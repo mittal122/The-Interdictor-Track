@@ -10,6 +10,7 @@ import bcrypt from "bcrypt";
 import { exec } from "child_process";
 import dotenv from "dotenv";
 import { TelemetryService } from "./src/services/telemetryService";
+import { AlertingWorker } from "./src/services/alertingWorker";
 import pool from "./src/services/db";
 
 dotenv.config();
@@ -101,6 +102,7 @@ async function startServer() {
   });
 
   const telemetryService = new TelemetryService();
+  const alertingWorker = new AlertingWorker();
 
   // Socket.io connection handling
   io.on("connection", (socket) => {
@@ -153,6 +155,9 @@ async function startServer() {
     try {
       const telemetryData = await telemetryService.getAggregatedTelemetry();
       io.emit("telemetry_update", telemetryData);
+
+      // Push payload through alerting worker
+      alertingWorker.checkThresholds(telemetryData).catch(console.error);
     } catch (error) {
       console.error("Failed to fetch telemetry data:", error);
     }

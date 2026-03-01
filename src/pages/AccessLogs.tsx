@@ -165,46 +165,53 @@ export function AccessLogs() {
                 </div>
             </div>
 
-            {/* Table Header */}
-            <div className="grid grid-cols-[80px_160px_80px_70px_120px_90px_160px_70px_1fr] gap-2 px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-800/50 shrink-0">
-                <span>ID</span>
-                <span>Timestamp</span>
-                <span>Type</span>
-                <span>Severity</span>
-                <span>Source IP</span>
-                <span>User</span>
-                <span>Action</span>
-                <span>Status</span>
-                <span>Details</span>
-            </div>
+            {/* Table Area */}
+            <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800/50 bg-zinc-900/20 flex flex-col">
+                <div className="overflow-x-auto h-full w-full">
+                    <div className="min-w-[1000px] h-full flex flex-col">
+                        {/* Table Header */}
+                        <div className="grid grid-cols-[80px_160px_80px_70px_120px_90px_160px_70px_1fr] gap-2 px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-800/50 shrink-0 bg-zinc-900/80 sticky top-0 z-10">
+                            <span>ID</span>
+                            <span>Timestamp</span>
+                            <span>Type</span>
+                            <span>Severity</span>
+                            <span>Source IP</span>
+                            <span>User</span>
+                            <span>Action</span>
+                            <span>Status</span>
+                            <span>Details</span>
+                        </div>
 
-            {/* Virtualized Table Body */}
-            <div ref={parentRef} className="flex-1 overflow-auto rounded-xl border border-zinc-800/50 bg-zinc-900/20">
-                <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-                    {rowVirtualizer.getVirtualItems().map(virtualRow => {
-                        const log = filteredLogs[virtualRow.index];
-                        return (
-                            <div
-                                key={log.id}
-                                className={cn(
-                                    "absolute top-0 left-0 w-full grid grid-cols-[80px_160px_80px_70px_120px_90px_160px_70px_1fr] gap-2 px-3 py-2.5 text-xs font-mono border-l-2 border-b border-zinc-800/20 hover:bg-zinc-800/30 transition-colors items-center",
-                                    severityColors[log.severity],
-                                    virtualRow.index % 2 === 0 ? "bg-zinc-950/30" : "bg-zinc-900/10"
-                                )}
-                                style={{ height: `${virtualRow.size}px`, transform: `translateY(${virtualRow.start}px)` }}
-                            >
-                                <span className="text-zinc-500 text-[10px]">{log.id}</span>
-                                <span className="text-zinc-400 text-[10px]">{log.timestamp}</span>
-                                <span className="text-zinc-300 text-[10px]">{log.eventType}</span>
-                                <span className={cn("text-[10px] rounded px-1.5 py-0.5 border text-center", severityBadge[log.severity])}>{log.severity}</span>
-                                <span className="text-zinc-300 text-[10px]">{log.sourceIp}</span>
-                                <span className="text-zinc-300 text-[10px] truncate">{log.user}</span>
-                                <span className="text-zinc-200 text-[10px] truncate">{log.action}</span>
-                                <span className={cn("text-[10px] font-semibold", statusBadge[log.status])}>{log.status}</span>
-                                <span className="text-zinc-500 text-[10px] truncate">{log.details}</span>
+                        {/* Virtualized Table Body */}
+                        <div ref={parentRef} className="flex-1 overflow-y-auto relative">
+                            <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+                                {rowVirtualizer.getVirtualItems().map(virtualRow => {
+                                    const log = filteredLogs[virtualRow.index];
+                                    return (
+                                        <div
+                                            key={log.id}
+                                            className={cn(
+                                                "absolute top-0 left-0 w-full grid grid-cols-[80px_160px_80px_70px_120px_90px_160px_70px_1fr] gap-2 px-3 py-2.5 text-xs font-mono border-l-2 border-b border-zinc-800/20 hover:bg-zinc-800/30 transition-colors items-center",
+                                                severityColors[log.severity],
+                                                virtualRow.index % 2 === 0 ? "bg-zinc-950/30" : "bg-zinc-900/10"
+                                            )}
+                                            style={{ height: `${virtualRow.size}px`, transform: `translateY(${virtualRow.start}px)` }}
+                                        >
+                                            <span className="text-zinc-500 text-[10px]">{log.id}</span>
+                                            <span className="text-zinc-400 text-[10px]">{log.timestamp}</span>
+                                            <span className="text-zinc-300 text-[10px]">{log.eventType}</span>
+                                            <span className={cn("text-[10px] rounded px-1.5 py-0.5 border text-center whitespace-nowrap", severityBadge[log.severity])}>{log.severity}</span>
+                                            <span className="text-zinc-300 text-[10px]">{log.sourceIp}</span>
+                                            <span className="text-zinc-300 text-[10px] truncate">{log.user}</span>
+                                            <span className="text-zinc-200 text-[10px] truncate">{log.action}</span>
+                                            <span className={cn("text-[10px] font-semibold", statusBadge[log.status])}>{log.status}</span>
+                                            <span className="text-zinc-500 text-[10px] truncate">{log.details}</span>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                        );
-                    })}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

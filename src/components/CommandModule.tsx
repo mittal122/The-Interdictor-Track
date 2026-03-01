@@ -2,8 +2,10 @@ import React, { useState } from "react";
 import { Terminal, Send, AlertCircle, CheckCircle2 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
+import { useAuth } from "../contexts/AuthContext";
 
 export function CommandModule() {
+  const { user } = useAuth();
   const [command, setCommand] = useState("");
   const [status, setStatus] = useState<"idle" | "executing" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
@@ -32,6 +34,16 @@ export function CommandModule() {
       }, 5000);
     });
   };
+
+  if (user?.role !== "admin") {
+    return (
+      <div className="flex h-full flex-col items-center justify-center rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4 shadow-sm text-center">
+        <AlertCircle className="h-8 w-8 text-red-500/50 mb-3" />
+        <h3 className="text-sm font-medium text-red-400 uppercase tracking-wider mb-1">Terminal Locked</h3>
+        <p className="text-xs text-zinc-500 max-w-[220px]">Administrator privileges required to execute remote terminal commands.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4 shadow-sm">

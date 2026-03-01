@@ -1,3 +1,5 @@
+import { AwsIntegrationService } from './awsIntegrationService';
+
 export interface Anomaly {
   id: string;
   lat: number;
@@ -13,10 +15,13 @@ export interface TelemetryData {
   serverLoad: { region: string; load: number }[];
   cpuUsage: number;
   memoryUsage: number;
+  computeNodes?: any[] | null;
+  billingData?: number | null;
 }
 
 export class TelemetryService {
   private prometheusUrl = process.env.PROMETHEUS_URL || 'http://localhost:9090';
+  private awsService = new AwsIntegrationService();
 
   // --- Simulated Fallback Generators ---
   // These provide realistic, non-zero data when Prometheus has no custom exporters yet.
@@ -47,11 +52,11 @@ export class TelemetryService {
 
   private simulateServerLoad(): { region: string; load: number }[] {
     return [
-      { region: "US-East",    load: 40 + Math.random() * 50 },
-      { region: "US-West",    load: 30 + Math.random() * 55 },
+      { region: "US-East", load: 40 + Math.random() * 50 },
+      { region: "US-West", load: 30 + Math.random() * 55 },
       { region: "EU-Central", load: 35 + Math.random() * 45 },
-      { region: "AP-South",   load: 25 + Math.random() * 60 },
-      { region: "AP-East",    load: 20 + Math.random() * 50 },
+      { region: "AP-South", load: 25 + Math.random() * 60 },
+      { region: "AP-East", load: 20 + Math.random() * 50 },
     ];
   }
 
@@ -140,12 +145,14 @@ export class TelemetryService {
   }
 
   async getAggregatedTelemetry(): Promise<TelemetryData> {
-    const [health, latency, anomalies, load, compute] = await Promise.all([
+    const [health, latency, anomalies, load, compute, computeNodes, billingData] = await Promise.all([
       this.fetchGlobalHealth(),
       this.fetchNetworkLatency(),
       this.fetchActiveAnomalies(),
       this.fetchServerLoad(),
       this.fetchComputeMetrics(),
+      this.awsService.getComputeNodes(),
+      this.awsService.getBillingData(),
     ]);
 
     return {
@@ -156,6 +163,8 @@ export class TelemetryService {
       serverLoad: load,
       cpuUsage: compute.cpu,
       memoryUsage: compute.memory,
+      computeNodes: computeNodes,
+      billingData: billingData,
     };
   }
 }

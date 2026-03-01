@@ -1,0 +1,60 @@
+name: Interdictor Command Center CI/CD
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Lint Frontend and Backend
+      run: npm run lint
+      continue-on-error: true # Warning only for hackathon
+        
+    - name: Build React Frontend
+      run: npm run build
+      
+    - name: Build Node/Express Backend (if applicable)
+      run: if [ -f "tsconfig.server.json" ]; then npx tsc -p tsconfig.server.json; fi
+      
+    # - name: Run Unit Tests
+    #   run: npm test
+
+  docker-build:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build Docker image (Dry Run / Local)
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: interdictor/command-center:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

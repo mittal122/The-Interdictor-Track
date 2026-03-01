@@ -119,8 +119,8 @@ export function GlobalNodes() {
             {/* Grid Map + Detail */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-1 min-h-0">
                 {/* Grid Map */}
-                <div className="lg:col-span-3 rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4">
-                    <div className="flex items-center justify-between mb-4">
+                <div className="lg:col-span-3 rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4 flex flex-col min-h-0">
+                    <div className="flex items-center justify-between mb-4 shrink-0">
                         <h3 className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Regional Health Grid</h3>
                         <div className="flex items-center gap-2 text-[10px] text-zinc-500">
                             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500/60" /> &gt;95%</span>
@@ -128,29 +128,31 @@ export function GlobalNodes() {
                             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-600/50" /> &lt;60%</span>
                         </div>
                     </div>
-                    <div className="grid grid-cols-6 grid-rows-4 gap-2" style={{ minHeight: "320px" }}>
-                        {regions.map(region => (
-                            <button
-                                key={region.id}
-                                onClick={() => setSelected(region)}
-                                className={cn(
-                                    "rounded-lg border p-2.5 text-left transition-all cursor-pointer flex flex-col justify-between",
-                                    healthColor(region.health),
-                                    selected?.id === region.id && "ring-2 ring-zinc-300 ring-offset-1 ring-offset-zinc-950"
-                                )}
-                                style={{ gridRow: region.row + 1, gridColumn: region.col + 1 }}
-                            >
-                                <div className="text-[11px] font-bold text-white/90 tracking-wider">{region.code}</div>
-                                <div className="mt-auto">
-                                    <div className={cn("text-lg font-mono font-bold", healthTextColor(region.health))}>
-                                        {region.health}%
+                    <div className="flex-1 overflow-x-auto min-h-0 pb-2 -mx-2 px-2 lg:mx-0 lg:px-0 lg:overflow-visible">
+                        <div className="grid grid-cols-6 grid-rows-4 gap-2 min-w-[600px] lg:min-w-0 h-full" style={{ minHeight: "320px" }}>
+                            {regions.map(region => (
+                                <button
+                                    key={region.id}
+                                    onClick={() => setSelected(region)}
+                                    className={cn(
+                                        "rounded-lg border p-2.5 text-left transition-all cursor-pointer flex flex-col justify-between",
+                                        healthColor(region.health),
+                                        selected?.id === region.id && "ring-2 ring-zinc-300 ring-offset-1 ring-offset-zinc-950"
+                                    )}
+                                    style={{ gridRow: region.row + 1, gridColumn: region.col + 1 }}
+                                >
+                                    <div className="text-[11px] font-bold text-white/90 tracking-wider">{region.code}</div>
+                                    <div className="mt-auto">
+                                        <div className={cn("text-lg font-mono font-bold", healthTextColor(region.health))}>
+                                            {region.health}%
+                                        </div>
+                                        <div className="text-[9px] text-white/60">
+                                            {region.nodeCount} nodes • {region.avgLatency}ms
+                                        </div>
                                     </div>
-                                    <div className="text-[9px] text-white/60">
-                                        {region.nodeCount} nodes • {region.avgLatency}ms
-                                    </div>
-                                </div>
-                            </button>
-                        ))}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
 

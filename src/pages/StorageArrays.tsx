@@ -122,21 +122,21 @@ export function StorageArrays() {
                             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500/70" /> &gt;800µs</span>
                         </div>
                     </div>
-                    <div className="grid grid-cols-6 gap-2">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                         {arrays.map(arr => (
                             <button
                                 key={arr.id}
                                 onClick={() => setSelected(arr)}
                                 className={cn(
-                                    "rounded-lg border p-3 text-left transition-all hover:scale-[1.03] hover:shadow-lg cursor-pointer",
+                                    "rounded-lg border p-2 sm:p-3 text-left transition-all hover:scale-[1.03] hover:shadow-lg cursor-pointer",
                                     getLatencyColor(arr.writeLatency),
                                     getLatencyBorderColor(arr.writeLatency),
                                     selected?.id === arr.id && "ring-2 ring-zinc-400 ring-offset-1 ring-offset-zinc-950"
                                 )}
                             >
-                                <div className="text-[10px] font-bold text-zinc-100 tracking-wider truncate">{arr.id}</div>
-                                <div className="text-lg font-mono font-bold text-white mt-1">{arr.writeLatency}<span className="text-[10px] font-normal ml-0.5">µs</span></div>
-                                <div className="text-[9px] text-zinc-200/80 mt-0.5 truncate">{arr.name}</div>
+                                <div className="text-[9px] sm:text-[10px] font-bold text-zinc-100 tracking-wider truncate">{arr.id}</div>
+                                <div className="text-base sm:text-lg font-mono font-bold text-white mt-1">{arr.writeLatency}<span className="text-[9px] sm:text-[10px] font-normal ml-0.5">µs</span></div>
+                                <div className="text-[8px] sm:text-[9px] text-zinc-200/80 mt-0.5 truncate">{arr.name}</div>
                             </button>
                         ))}
                     </div>

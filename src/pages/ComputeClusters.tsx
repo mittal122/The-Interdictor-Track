@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Activity, Cpu, Zap, AlertTriangle, Server, Thermometer } from "lucide-react";
 import { cn } from "../utils/cn";
+import { useSocket } from "../contexts/SocketContext";
 
 // --- Types ---
 interface ServerUnit {
@@ -60,23 +61,43 @@ const statusGlow: Record<string, string> = {
 };
 
 export function ComputeClusters() {
-    const [servers, setServers] = useState<ServerUnit[]>(() => generateServers());
+    const { telemetry } = useSocket();
+    const [localServers, setLocalServers] = useState<ServerUnit[]>(() => generateServers());
     const [selected, setSelected] = useState<ServerUnit | null>(null);
 
     useEffect(() => {
-        const interval = setInterval(() => setServers(generateServers()), 3000);
+        if (telemetry?.computeNodes && telemetry.computeNodes.length > 0) return;
+        const interval = setInterval(() => setLocalServers(generateServers()), 3000);
         return () => clearInterval(interval);
-    }, []);
+    }, [telemetry?.computeNodes]);
+
+    const servers: ServerUnit[] = telemetry?.computeNodes?.length
+        ? telemetry.computeNodes.map((n: any, i: number) => ({
+            id: n.id,
+            hostname: `${n.type} (${n.region})`,
+            ip: n.instanceId || "cloud-managed",
+            rack: n.rack || "AWS-CLOUD",
+            slot: i + 1,
+            status: n.status === 'running' || n.status === 'online' ? 'online' : 'offline',
+            cpu: n.cpu || 0,
+            ram: n.memory || 0,
+            disk: n.disk || 25,
+            pue: 1.12,
+            uptime: n.uptime || "0h",
+            temp: (n.status === 'running' || n.status === 'online') ? 45 : 0
+        }))
+        : localServers;
 
     const stats = useMemo(() => {
         const online = servers.filter(s => s.status === "online").length;
         const offline = servers.filter(s => s.status === "offline").length;
-        const avgPue = +(servers.reduce((s, sv) => s + sv.pue, 0) / servers.length).toFixed(2);
-        const avgCpu = Math.round(servers.filter(s => s.status !== "offline").reduce((s, sv) => s + sv.cpu, 0) / servers.filter(s => s.status !== "offline").length);
+        const avgPue = servers.length ? +(servers.reduce((s, sv) => s + sv.pue, 0) / servers.length).toFixed(2) : 0;
+        const activeServers = servers.filter(s => s.status !== "offline");
+        const avgCpu = activeServers.length ? Math.round(activeServers.reduce((s, sv) => s + sv.cpu, 0) / activeServers.length) : 0;
         return { total: servers.length, online, offline, avgPue, avgCpu };
     }, [servers]);
 
-    const racks = ["RACK-A", "RACK-B", "RACK-C", "RACK-D"];
+    const racks = Array.from(new Set(servers.map(s => s.rack)));
 
     return (
         <div className="flex h-full flex-col gap-6 overflow-y-auto">
@@ -106,7 +127,7 @@ export function ComputeClusters() {
                 {/* Rack Visualization */}
                 <div className="lg:col-span-3 rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-6">
                     <h3 className="text-sm font-medium text-zinc-300 uppercase tracking-wider mb-6">Server Rack Layout</h3>
-                    <div className="grid grid-cols-4 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
                         {racks.map((rack) => {
                             const rackServers = servers.filter(s => s.rack === rack);
                             return (
