@@ -18,44 +18,32 @@ interface GridRegion {
     status: "healthy" | "degraded" | "critical" | "offline";
 }
 
-// 24 geographic grid cells
-const REGION_MAP: { code: string; name: string; row: number; col: number; awsPrefix?: string }[] = [
-    { code: "NA-NW", name: "N. America Northwest", row: 0, col: 0, awsPrefix: "us-west" },
-    { code: "NA-NE", name: "N. America Northeast", row: 0, col: 1, awsPrefix: "us-east" },
-    { code: "NA-SW", name: "N. America Southwest", row: 1, col: 0, awsPrefix: "us-west" },
-    { code: "NA-SE", name: "N. America Southeast", row: 1, col: 1, awsPrefix: "us-east" },
-    { code: "EU-NW", name: "Europe Northwest", row: 0, col: 2, awsPrefix: "eu-west" },
-    { code: "EU-NE", name: "Europe Northeast", row: 0, col: 3, awsPrefix: "eu-north" },
-    { code: "EU-SW", name: "Europe Southwest", row: 1, col: 2, awsPrefix: "eu-west" },
-    { code: "EU-SE", name: "Europe Southeast", row: 1, col: 3, awsPrefix: "eu-central" },
-    { code: "AF-NW", name: "Africa Northwest", row: 2, col: 2, awsPrefix: "af-south" },
-    { code: "AF-NE", name: "Africa Northeast", row: 2, col: 3, awsPrefix: "me-south" },
-    { code: "AF-SW", name: "Africa Southwest", row: 3, col: 2, awsPrefix: "af-south" },
-    { code: "AF-SE", name: "Africa Southeast", row: 3, col: 3, awsPrefix: "af-south" },
-    { code: "AS-NW", name: "Asia Northwest", row: 0, col: 4, awsPrefix: "ap-south" },
-    { code: "AS-NE", name: "Asia Northeast", row: 0, col: 5, awsPrefix: "ap-northeast" },
-    { code: "AS-SW", name: "Asia Southwest", row: 1, col: 4, awsPrefix: "ap-south" },
-    { code: "AS-SE", name: "Asia Southeast", row: 1, col: 5, awsPrefix: "ap-southeast" },
-    { code: "OC-NW", name: "Oceania Northwest", row: 2, col: 4, awsPrefix: "ap-southeast" },
-    { code: "OC-NE", name: "Oceania Northeast", row: 2, col: 5, awsPrefix: "ap-southeast" },
-    { code: "OC-SW", name: "Oceania Southwest", row: 3, col: 4, awsPrefix: "ap-southeast" },
-    { code: "OC-SE", name: "Oceania Southeast", row: 3, col: 5, awsPrefix: "ap-southeast" },
-    { code: "SA-NW", name: "S. America Northwest", row: 2, col: 0, awsPrefix: "sa-east" },
-    { code: "SA-NE", name: "S. America Northeast", row: 2, col: 1, awsPrefix: "sa-east" },
-    { code: "SA-SW", name: "S. America Southwest", row: 3, col: 0, awsPrefix: "sa-east" },
-    { code: "SA-SE", name: "S. America Southeast", row: 3, col: 1, awsPrefix: "sa-east" },
+// 12 Common AWS Regions for Demo Simulation
+const DEMO_REGIONS = [
+    { code: "us-east-1", name: "US East (N. Virginia)" },
+    { code: "us-east-2", name: "US East (Ohio)" },
+    { code: "us-west-1", name: "US West (N. California)" },
+    { code: "us-west-2", name: "US West (Oregon)" },
+    { code: "eu-west-1", name: "Europe (Ireland)" },
+    { code: "eu-central-1", name: "Europe (Frankfurt)" },
+    { code: "eu-north-1", name: "Europe (Stockholm)" },
+    { code: "ap-southeast-1", name: "Asia Pacific (Singapore)" },
+    { code: "ap-southeast-2", name: "Asia Pacific (Sydney)" },
+    { code: "ap-northeast-1", name: "Asia Pacific (Tokyo)" },
+    { code: "sa-east-1", name: "South America (São Paulo)" },
+    { code: "af-south-1", name: "Africa (Cape Town)" },
 ];
 
 // --- Demo data generator ---
 function generateDemoRegions(): GridRegion[] {
-    return REGION_MAP.map((r, i) => {
+    return DEMO_REGIONS.map((r, i) => {
         const health = Math.random() > 0.9 ? 50 + Math.random() * 30 : 80 + Math.random() * 20;
         return {
             id: `REG-${String(i).padStart(2, "0")}`,
             code: r.code,
             name: r.name,
-            row: r.row,
-            col: r.col,
+            row: 0,
+            col: 0,
             nodeCount: Math.floor(5 + Math.random() * 45),
             health: Math.round(health * 10) / 10,
             avgLatency: Math.round(5 + Math.random() * (health < 80 ? 120 : 50)),
@@ -67,51 +55,31 @@ function generateDemoRegions(): GridRegion[] {
 
 // --- Build live regions from AWS EC2 nodes ---
 function buildLiveRegions(computeNodes: any[]): GridRegion[] {
-    // Group EC2 instances by their region prefix
+    // Group EC2 instances by their exact AWS region
     const regionGroups: Record<string, any[]> = {};
     computeNodes.forEach(node => {
-        const nodeRegion = (node.region || "").toLowerCase();
-        // Find best-matching REGION_MAP entry by awsPrefix
-        const match = REGION_MAP.find(r => r.awsPrefix && nodeRegion.startsWith(r.awsPrefix));
-        const key = match?.code || "NA-NE"; // default to us-east if unmatched
+        const key = (node.region || "unknown-region").toLowerCase();
         if (!regionGroups[key]) regionGroups[key] = [];
         regionGroups[key].push(node);
     });
 
-    return REGION_MAP.map((r, i) => {
-        const nodes = regionGroups[r.code] || [];
-        const hasLiveData = nodes.length > 0;
+    return Object.keys(regionGroups).map((regionKey, i) => {
+        const nodes = regionGroups[regionKey];
+        const runningNodes = nodes.filter((n: any) => n.status === "running");
+        const health = nodes.length > 0 ? Math.round((runningNodes.length / nodes.length) * 100) : 100;
+        const avgCpu = nodes.reduce((s: number, n: any) => s + (n.cpu || 0), 0) / nodes.length;
 
-        if (hasLiveData) {
-            const runningNodes = nodes.filter((n: any) => n.status === "running");
-            const health = nodes.length > 0 ? Math.round((runningNodes.length / nodes.length) * 100) : 100;
-            const avgCpu = nodes.reduce((s: number, n: any) => s + (n.cpu || 0), 0) / nodes.length;
-            return {
-                id: `REG-${String(i).padStart(2, "0")}`,
-                code: r.code,
-                name: r.name,
-                row: r.row,
-                col: r.col,
-                nodeCount: nodes.length,
-                health,
-                avgLatency: Math.round(10 + avgCpu * 0.5), // derived estimate
-                bandwidth: Math.round(nodes.length * 0.8 * 10) / 10,
-                status: health >= 95 ? "healthy" : health >= 80 ? "degraded" : health >= 60 ? "critical" : "offline",
-            };
-        }
-
-        // Region has no EC2 nodes — show as low-confidence offline
         return {
-            id: `REG-${String(i).padStart(2, "0")}`,
-            code: r.code,
-            name: r.name,
-            row: r.row,
-            col: r.col,
-            nodeCount: 0,
-            health: 0,
-            avgLatency: 0,
-            bandwidth: 0,
-            status: "offline" as const,
+            id: `REG-${regionKey}`,
+            code: regionKey, // e.g., us-east-1
+            name: `AWS ${regionKey.toUpperCase()}`,
+            row: 0,
+            col: 0,
+            nodeCount: nodes.length,
+            health,
+            avgLatency: Math.round(10 + avgCpu * 0.5),
+            bandwidth: Math.round(nodes.length * 0.8 * 10) / 10,
+            status: health >= 95 ? "healthy" : health >= 80 ? "degraded" : health >= 60 ? "critical" : "offline",
         };
     });
 }
@@ -147,9 +115,13 @@ export function GlobalNodes() {
 
     // Decide which data source to use
     const isLive = mode === "live" && telemetry?.computeNodes && telemetry.computeNodes.length > 0;
-    const regions: GridRegion[] = isLive
+
+    // In Live Mode, filter out regions with 0 nodes. In Demo mode, show all regions.
+    const allRegions: GridRegion[] = isLive
         ? buildLiveRegions(telemetry.computeNodes)
         : demoRegions;
+
+    const regions = isLive ? allRegions.filter(r => r.nodeCount > 0) : allRegions;
 
     const stats = useMemo(() => ({
         totalNodes: regions.reduce((s, r) => s + r.nodeCount, 0),
@@ -204,30 +176,37 @@ export function GlobalNodes() {
                         </div>
                     </div>
                     <div className="flex-1 overflow-x-auto min-h-0 pb-2 -mx-2 px-2 lg:mx-0 lg:px-0 lg:overflow-visible">
-                        <div className="grid grid-cols-6 grid-rows-4 gap-2 min-w-[600px] lg:min-w-0 h-full" style={{ minHeight: "320px" }}>
-                            {regions.map(region => (
-                                <button
-                                    key={region.id}
-                                    onClick={() => setSelected(region)}
-                                    className={cn(
-                                        "rounded-lg border p-2.5 text-left transition-all cursor-pointer flex flex-col justify-between",
-                                        healthColor(region.health),
-                                        selected?.id === region.id && "ring-2 ring-zinc-300 ring-offset-1 ring-offset-zinc-950"
-                                    )}
-                                    style={{ gridRow: region.row + 1, gridColumn: region.col + 1 }}
-                                >
-                                    <div className="text-[11px] font-bold text-white/90 tracking-wider">{region.code}</div>
-                                    <div className="mt-auto">
-                                        <div className={cn("text-lg font-mono font-bold", healthTextColor(region.health))}>
-                                            {region.health > 0 ? `${region.health}%` : "—"}
+                        {regions.length > 0 ? (
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 min-w-0 h-full content-start items-stretch" style={{ minHeight: "320px" }}>
+                                {regions.map(region => (
+                                    <button
+                                        key={region.id}
+                                        onClick={() => setSelected(region)}
+                                        className={cn(
+                                            "rounded-lg border p-3 text-left transition-all cursor-pointer flex flex-col justify-between min-h-[80px]",
+                                            healthColor(region.health),
+                                            selected?.id === region.id && "ring-2 ring-zinc-300 ring-offset-1 ring-offset-zinc-950"
+                                        )}
+                                    >
+                                        <div className="text-[11px] font-bold text-white/90 tracking-wider">{region.code}</div>
+                                        <div className="mt-auto">
+                                            <div className={cn("text-lg font-mono font-bold", healthTextColor(region.health))}>
+                                                {region.health > 0 ? `${region.health}%` : "—"}
+                                            </div>
+                                            <div className="text-[9px] text-white/60">
+                                                {region.nodeCount > 0 ? `${region.nodeCount} nodes · ${region.avgLatency}ms` : "no nodes"}
+                                            </div>
                                         </div>
-                                        <div className="text-[9px] text-white/60">
-                                            {region.nodeCount > 0 ? `${region.nodeCount} nodes · ${region.avgLatency}ms` : "no nodes"}
-                                        </div>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-zinc-600 border border-zinc-800/50 border-dashed rounded-lg" style={{ minHeight: "320px" }}>
+                                <Globe className="h-8 w-8 mb-2 opacity-50" />
+                                <p className="text-sm uppercase tracking-wider font-semibold">No Active Zones</p>
+                                <p className="text-xs text-zinc-500 mt-1">No EC2 instances found in any region.</p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
