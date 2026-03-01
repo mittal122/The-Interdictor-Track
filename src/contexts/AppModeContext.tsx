@@ -13,13 +13,11 @@ const AppModeContext = createContext<AppModeContextType>({
 });
 
 export function AppModeProvider({ children }: { children: React.ReactNode }) {
-    const [mode, setModeState] = useState<AppMode>(() => {
-        const saved = localStorage.getItem('interdictor-mode');
-        return (saved === 'live' || saved === 'demo') ? saved : 'demo';
-    });
+    // Mode is TRANSIENT — always starts as 'demo' on fresh load.
+    // This prevents a stale 'live' mode from bypassing the credential wizard on refresh.
+    const [mode, setModeState] = useState<AppMode>('demo');
 
     const setMode = (newMode: AppMode) => {
-        localStorage.setItem('interdictor-mode', newMode);
         setModeState(newMode);
     };
 

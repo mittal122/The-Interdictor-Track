@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Globe, Activity, Network, AlertTriangle, Signal } from "lucide-react";
+import { Globe, Activity, Network, AlertTriangle, Signal, Wifi, FlaskConical } from "lucide-react";
 import { cn } from "../utils/cn";
+import { useSocket } from "../contexts/SocketContext";
+import { useAppMode } from "../contexts/AppModeContext";
 
 // --- Types ---
 interface GridRegion {
@@ -10,41 +12,42 @@ interface GridRegion {
     row: number;
     col: number;
     nodeCount: number;
-    health: number;       // 0-100%
-    avgLatency: number;   // ms
-    bandwidth: number;    // Gbps
+    health: number;
+    avgLatency: number;
+    bandwidth: number;
     status: "healthy" | "degraded" | "critical" | "offline";
 }
 
-// --- Data Generator ---
-const REGION_MAP: { code: string; name: string; row: number; col: number }[] = [
-    { code: "NA-NW", name: "N. America Northwest", row: 0, col: 0 },
-    { code: "NA-NE", name: "N. America Northeast", row: 0, col: 1 },
-    { code: "NA-SW", name: "N. America Southwest", row: 1, col: 0 },
-    { code: "NA-SE", name: "N. America Southeast", row: 1, col: 1 },
-    { code: "EU-NW", name: "Europe Northwest", row: 0, col: 2 },
-    { code: "EU-NE", name: "Europe Northeast", row: 0, col: 3 },
-    { code: "EU-SW", name: "Europe Southwest", row: 1, col: 2 },
-    { code: "EU-SE", name: "Europe Southeast", row: 1, col: 3 },
-    { code: "AF-NW", name: "Africa Northwest", row: 2, col: 2 },
-    { code: "AF-NE", name: "Africa Northeast", row: 2, col: 3 },
-    { code: "AF-SW", name: "Africa Southwest", row: 3, col: 2 },
-    { code: "AF-SE", name: "Africa Southeast", row: 3, col: 3 },
-    { code: "AS-NW", name: "Asia Northwest", row: 0, col: 4 },
-    { code: "AS-NE", name: "Asia Northeast", row: 0, col: 5 },
-    { code: "AS-SW", name: "Asia Southwest", row: 1, col: 4 },
-    { code: "AS-SE", name: "Asia Southeast", row: 1, col: 5 },
-    { code: "OC-NW", name: "Oceania Northwest", row: 2, col: 4 },
-    { code: "OC-NE", name: "Oceania Northeast", row: 2, col: 5 },
-    { code: "OC-SW", name: "Oceania Southwest", row: 3, col: 4 },
-    { code: "OC-SE", name: "Oceania Southeast", row: 3, col: 5 },
-    { code: "SA-NW", name: "S. America Northwest", row: 2, col: 0 },
-    { code: "SA-NE", name: "S. America Northeast", row: 2, col: 1 },
-    { code: "SA-SW", name: "S. America Southwest", row: 3, col: 0 },
-    { code: "SA-SE", name: "S. America Southeast", row: 3, col: 1 },
+// 24 geographic grid cells
+const REGION_MAP: { code: string; name: string; row: number; col: number; awsPrefix?: string }[] = [
+    { code: "NA-NW", name: "N. America Northwest", row: 0, col: 0, awsPrefix: "us-west" },
+    { code: "NA-NE", name: "N. America Northeast", row: 0, col: 1, awsPrefix: "us-east" },
+    { code: "NA-SW", name: "N. America Southwest", row: 1, col: 0, awsPrefix: "us-west" },
+    { code: "NA-SE", name: "N. America Southeast", row: 1, col: 1, awsPrefix: "us-east" },
+    { code: "EU-NW", name: "Europe Northwest", row: 0, col: 2, awsPrefix: "eu-west" },
+    { code: "EU-NE", name: "Europe Northeast", row: 0, col: 3, awsPrefix: "eu-north" },
+    { code: "EU-SW", name: "Europe Southwest", row: 1, col: 2, awsPrefix: "eu-west" },
+    { code: "EU-SE", name: "Europe Southeast", row: 1, col: 3, awsPrefix: "eu-central" },
+    { code: "AF-NW", name: "Africa Northwest", row: 2, col: 2, awsPrefix: "af-south" },
+    { code: "AF-NE", name: "Africa Northeast", row: 2, col: 3, awsPrefix: "me-south" },
+    { code: "AF-SW", name: "Africa Southwest", row: 3, col: 2, awsPrefix: "af-south" },
+    { code: "AF-SE", name: "Africa Southeast", row: 3, col: 3, awsPrefix: "af-south" },
+    { code: "AS-NW", name: "Asia Northwest", row: 0, col: 4, awsPrefix: "ap-south" },
+    { code: "AS-NE", name: "Asia Northeast", row: 0, col: 5, awsPrefix: "ap-northeast" },
+    { code: "AS-SW", name: "Asia Southwest", row: 1, col: 4, awsPrefix: "ap-south" },
+    { code: "AS-SE", name: "Asia Southeast", row: 1, col: 5, awsPrefix: "ap-southeast" },
+    { code: "OC-NW", name: "Oceania Northwest", row: 2, col: 4, awsPrefix: "ap-southeast" },
+    { code: "OC-NE", name: "Oceania Northeast", row: 2, col: 5, awsPrefix: "ap-southeast" },
+    { code: "OC-SW", name: "Oceania Southwest", row: 3, col: 4, awsPrefix: "ap-southeast" },
+    { code: "OC-SE", name: "Oceania Southeast", row: 3, col: 5, awsPrefix: "ap-southeast" },
+    { code: "SA-NW", name: "S. America Northwest", row: 2, col: 0, awsPrefix: "sa-east" },
+    { code: "SA-NE", name: "S. America Northeast", row: 2, col: 1, awsPrefix: "sa-east" },
+    { code: "SA-SW", name: "S. America Southwest", row: 3, col: 0, awsPrefix: "sa-east" },
+    { code: "SA-SE", name: "S. America Southeast", row: 3, col: 1, awsPrefix: "sa-east" },
 ];
 
-function generateRegions(): GridRegion[] {
+// --- Demo data generator ---
+function generateDemoRegions(): GridRegion[] {
     return REGION_MAP.map((r, i) => {
         const health = Math.random() > 0.9 ? 50 + Math.random() * 30 : 80 + Math.random() * 20;
         return {
@@ -62,37 +65,98 @@ function generateRegions(): GridRegion[] {
     });
 }
 
+// --- Build live regions from AWS EC2 nodes ---
+function buildLiveRegions(computeNodes: any[]): GridRegion[] {
+    // Group EC2 instances by their region prefix
+    const regionGroups: Record<string, any[]> = {};
+    computeNodes.forEach(node => {
+        const nodeRegion = (node.region || "").toLowerCase();
+        // Find best-matching REGION_MAP entry by awsPrefix
+        const match = REGION_MAP.find(r => r.awsPrefix && nodeRegion.startsWith(r.awsPrefix));
+        const key = match?.code || "NA-NE"; // default to us-east if unmatched
+        if (!regionGroups[key]) regionGroups[key] = [];
+        regionGroups[key].push(node);
+    });
+
+    return REGION_MAP.map((r, i) => {
+        const nodes = regionGroups[r.code] || [];
+        const hasLiveData = nodes.length > 0;
+
+        if (hasLiveData) {
+            const runningNodes = nodes.filter((n: any) => n.status === "running");
+            const health = nodes.length > 0 ? Math.round((runningNodes.length / nodes.length) * 100) : 100;
+            const avgCpu = nodes.reduce((s: number, n: any) => s + (n.cpu || 0), 0) / nodes.length;
+            return {
+                id: `REG-${String(i).padStart(2, "0")}`,
+                code: r.code,
+                name: r.name,
+                row: r.row,
+                col: r.col,
+                nodeCount: nodes.length,
+                health,
+                avgLatency: Math.round(10 + avgCpu * 0.5), // derived estimate
+                bandwidth: Math.round(nodes.length * 0.8 * 10) / 10,
+                status: health >= 95 ? "healthy" : health >= 80 ? "degraded" : health >= 60 ? "critical" : "offline",
+            };
+        }
+
+        // Region has no EC2 nodes — show as low-confidence offline
+        return {
+            id: `REG-${String(i).padStart(2, "0")}`,
+            code: r.code,
+            name: r.name,
+            row: r.row,
+            col: r.col,
+            nodeCount: 0,
+            health: 0,
+            avgLatency: 0,
+            bandwidth: 0,
+            status: "offline" as const,
+        };
+    });
+}
+
 function healthColor(health: number): string {
     if (health >= 95) return "bg-emerald-500/60 border-emerald-500/30 hover:bg-emerald-500/80";
     if (health >= 85) return "bg-emerald-700/40 border-emerald-600/20 hover:bg-emerald-600/50";
     if (health >= 80) return "bg-yellow-600/40 border-yellow-600/20 hover:bg-yellow-500/50";
     if (health >= 60) return "bg-orange-600/40 border-orange-600/20 hover:bg-orange-500/50";
-    return "bg-red-600/50 border-red-600/30 hover:bg-red-500/60";
+    if (health > 0) return "bg-red-600/50 border-red-600/30 hover:bg-red-500/60";
+    return "bg-zinc-800/40 border-zinc-700/20 hover:bg-zinc-700/30";
 }
-
 function healthTextColor(health: number): string {
     if (health >= 95) return "text-emerald-300";
     if (health >= 80) return "text-yellow-300";
     if (health >= 60) return "text-orange-300";
-    return "text-red-300";
+    if (health > 0) return "text-red-300";
+    return "text-zinc-600";
 }
 
 export function GlobalNodes() {
-    const [regions, setRegions] = useState<GridRegion[]>(() => generateRegions());
+    const { telemetry } = useSocket();
+    const { mode } = useAppMode();
+    const [demoRegions, setDemoRegions] = useState<GridRegion[]>(() => generateDemoRegions());
     const [selected, setSelected] = useState<GridRegion | null>(null);
 
+    // Only run the demo interval in demo mode
     useEffect(() => {
-        const interval = setInterval(() => setRegions(generateRegions()), 3000);
+        if (mode === "live") return;
+        const interval = setInterval(() => setDemoRegions(generateDemoRegions()), 3000);
         return () => clearInterval(interval);
-    }, []);
+    }, [mode]);
 
-    const stats = useMemo(() => {
-        const totalNodes = regions.reduce((s, r) => s + r.nodeCount, 0);
-        const avgHealth = Math.round(regions.reduce((s, r) => s + r.health, 0) / regions.length * 10) / 10;
-        const worst = [...regions].sort((a, b) => a.health - b.health)[0];
-        const activeRegions = regions.filter(r => r.health > 0).length;
-        return { totalNodes, avgHealth, worst, activeRegions };
-    }, [regions]);
+    // Decide which data source to use
+    const isLive = mode === "live" && telemetry?.computeNodes && telemetry.computeNodes.length > 0;
+    const regions: GridRegion[] = isLive
+        ? buildLiveRegions(telemetry.computeNodes)
+        : demoRegions;
+
+    const stats = useMemo(() => ({
+        totalNodes: regions.reduce((s, r) => s + r.nodeCount, 0),
+        avgHealth: Math.round(regions.reduce((s, r) => s + r.health, 0) / regions.length * 10) / 10,
+        worst: [...regions].sort((a, b) => a.health - b.health)[0],
+        activeRegions: regions.filter(r => r.health > 0).length,
+    }), [regions]);
 
     return (
         <div className="flex h-full flex-col gap-6 overflow-y-auto">
@@ -103,8 +167,19 @@ export function GlobalNodes() {
                     <p className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Geographic Grid Health Map</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Globe className="h-4 w-4 text-blue-400 animate-pulse" />
-                    <span className="text-xs font-medium uppercase tracking-widest text-blue-400">Global Feed</span>
+                    {isLive ? (
+                        <>
+                            <Wifi className="h-4 w-4 text-emerald-400 animate-pulse" />
+                            <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">
+                                Live · {telemetry.computeNodes.length} EC2 Nodes
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            <FlaskConical className="h-4 w-4 text-yellow-400 animate-pulse" />
+                            <span className="text-xs font-medium uppercase tracking-widest text-yellow-400">Demo Feed</span>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -118,14 +193,14 @@ export function GlobalNodes() {
 
             {/* Grid Map + Detail */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-1 min-h-0">
-                {/* Grid Map */}
                 <div className="lg:col-span-3 rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4 flex flex-col min-h-0">
                     <div className="flex items-center justify-between mb-4 shrink-0">
                         <h3 className="text-sm font-medium text-zinc-300 uppercase tracking-wider">Regional Health Grid</h3>
                         <div className="flex items-center gap-2 text-[10px] text-zinc-500">
                             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500/60" /> &gt;95%</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-600/40" /> 80-95%</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-600/40" /> 80–95%</span>
                             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-600/50" /> &lt;60%</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-zinc-800/40" /> No Nodes</span>
                         </div>
                     </div>
                     <div className="flex-1 overflow-x-auto min-h-0 pb-2 -mx-2 px-2 lg:mx-0 lg:px-0 lg:overflow-visible">
@@ -144,10 +219,10 @@ export function GlobalNodes() {
                                     <div className="text-[11px] font-bold text-white/90 tracking-wider">{region.code}</div>
                                     <div className="mt-auto">
                                         <div className={cn("text-lg font-mono font-bold", healthTextColor(region.health))}>
-                                            {region.health}%
+                                            {region.health > 0 ? `${region.health}%` : "—"}
                                         </div>
                                         <div className="text-[9px] text-white/60">
-                                            {region.nodeCount} nodes • {region.avgLatency}ms
+                                            {region.nodeCount > 0 ? `${region.nodeCount} nodes · ${region.avgLatency}ms` : "no nodes"}
                                         </div>
                                     </div>
                                 </button>
@@ -168,20 +243,24 @@ export function GlobalNodes() {
                                     <div className="text-zinc-500 text-[10px]">{selected.name}</div>
                                 </div>
                             </div>
-                            <DetailRow label="Health" value={`${selected.health}%`} color={healthTextColor(selected.health)} />
-                            <DetailRow label="Status" value={selected.status.toUpperCase()} color={selected.status === "healthy" ? "text-emerald-400" : selected.status === "degraded" ? "text-yellow-400" : "text-red-400"} />
+                            <DetailRow label="Health" value={selected.health > 0 ? `${selected.health}%` : "No data"} color={healthTextColor(selected.health)} />
+                            <DetailRow label="Status" value={selected.status.toUpperCase()} color={selected.status === "healthy" ? "text-emerald-400" : selected.status === "offline" ? "text-zinc-500" : "text-yellow-400"} />
                             <DetailRow label="Node Count" value={selected.nodeCount.toString()} />
-                            <DetailRow label="Avg Latency" value={`${selected.avgLatency} ms`} color={selected.avgLatency > 80 ? "text-red-400" : "text-zinc-200"} />
-                            <DetailRow label="Bandwidth" value={`${selected.bandwidth} Gbps`} />
-                            <div className="mt-3">
-                                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Health</div>
-                                <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
-                                    <div
-                                        className={cn("h-full rounded-full transition-all", selected.health >= 80 ? "bg-emerald-500" : selected.health >= 60 ? "bg-yellow-500" : "bg-red-500")}
-                                        style={{ width: `${selected.health}%` }}
-                                    />
+                            <DetailRow label="Avg Latency" value={selected.avgLatency > 0 ? `${selected.avgLatency} ms` : "—"} color={selected.avgLatency > 80 ? "text-red-400" : "text-zinc-200"} />
+                            <DetailRow label="Bandwidth" value={selected.bandwidth > 0 ? `${selected.bandwidth} Gbps` : "—"} />
+                            {isLive && <DetailRow label="Source" value="AWS EC2 Live" color="text-emerald-400" />}
+                            {!isLive && <DetailRow label="Source" value="Simulation" color="text-yellow-500" />}
+                            {selected.health > 0 && (
+                                <div className="mt-3">
+                                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Health</div>
+                                    <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
+                                        <div
+                                            className={cn("h-full rounded-full transition-all", selected.health >= 80 ? "bg-emerald-500" : selected.health >= 60 ? "bg-yellow-500" : "bg-red-500")}
+                                            style={{ width: `${selected.health}%` }}
+                                        />
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
                     ) : (
                         <div className="flex flex-col items-center justify-center h-48 text-zinc-600">
@@ -195,7 +274,6 @@ export function GlobalNodes() {
     );
 }
 
-// --- Sub-components ---
 function MiniKPI({ icon: Icon, label, value, color = "text-zinc-100" }: { icon: React.ElementType; label: string; value: string; color?: string }) {
     return (
         <div className="rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-3">

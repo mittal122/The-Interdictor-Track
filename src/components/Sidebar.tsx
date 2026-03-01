@@ -3,6 +3,8 @@ import { ChevronDown, ChevronRight, LayoutDashboard, Settings, ShieldAlert, Term
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../utils/cn";
 import { useAuth } from "../contexts/AuthContext";
+import { useCredentials } from "../contexts/CredentialsContext";
+import { useAppMode } from "../contexts/AppModeContext";
 
 type NavItemType = {
   name: string;
@@ -41,6 +43,14 @@ function Server(props: any) {
 export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => void }) {
   const [expanded, setExpanded] = useState<string[]>(["Infrastructure", "Security"]);
   const { logout } = useAuth();
+  const { clearCredentials } = useCredentials();
+  const { setMode } = useAppMode();
+
+  const handleLogout = () => {
+    clearCredentials();   // wipe transient AWS keys from memory
+    setMode('demo');      // revert to safe demo mode
+    logout();
+  };
 
   const toggleExpand = (name: string) => {
     setExpanded((prev) =>
@@ -95,7 +105,7 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
 
       <div className="p-4 border-t border-zinc-800/50 shrink-0">
         <button
-          onClick={logout}
+          onClick={handleLogout}
           className={cn(
             "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors text-zinc-400 hover:bg-zinc-800/50 hover:text-red-400",
             !isOpen && "justify-center px-0"

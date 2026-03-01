@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useCredentials } from './CredentialsContext';
+import { useAppMode } from './AppModeContext';
 
 interface User {
   username: string;
@@ -41,6 +43,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // Clear transient cloud credentials and revert to safe Demo Mode
+    try {
+      const { clearCredentials } = useCredentials();
+      clearCredentials();
+    } catch { } // CredentialsContext may not be mounted during early teardown
   };
 
   if (loading) return null;

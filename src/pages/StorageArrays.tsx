@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Database, HardDrive, Activity, ArrowUpDown, Zap } from "lucide-react";
+import { Database, HardDrive, Activity, ArrowUpDown, Zap, Wifi, FlaskConical } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn } from "../utils/cn";
+import { useAppMode } from "../contexts/AppModeContext";
 
 // --- Simulated Data ---
 interface StorageArray {
@@ -57,6 +58,7 @@ function getLatencyBorderColor(latency: number): string {
 
 // --- Component ---
 export function StorageArrays() {
+    const { mode } = useAppMode();
     const [arrays, setArrays] = useState<StorageArray[]>(() => generateArrays());
     const [selected, setSelected] = useState<StorageArray | null>(null);
     const [iopsHistory, setIopsHistory] = useState<{ time: string; iops: number }[]>([]);
@@ -97,7 +99,17 @@ export function StorageArrays() {
                     <p className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Write Latency Heatmap & Performance Metrics</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-emerald-500 animate-pulse" />
+                    {mode === 'live' ? (
+                        <>
+                            <Wifi className="h-4 w-4 text-emerald-400 animate-pulse" />
+                            <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">Live Simulation</span>
+                        </>
+                    ) : (
+                        <>
+                            <FlaskConical className="h-4 w-4 text-yellow-400 animate-pulse" />
+                            <span className="text-xs font-medium uppercase tracking-widest text-yellow-400">Demo Feed</span>
+                        </>
+                    )}
                     <span className="text-xs font-medium uppercase tracking-widest text-emerald-500">Live</span>
                 </div>
             </div>

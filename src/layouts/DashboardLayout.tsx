@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
+import { LiveModeWizard } from '../components/LiveModeWizard';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 
@@ -23,6 +24,8 @@ export function DashboardLayout() {
           <Outlet />
         </main>
       </div>
+      {/* Live Mode wizard renders as a full-screen overlay when active */}
+      <LiveModeWizard />
     </div>
   );
 }

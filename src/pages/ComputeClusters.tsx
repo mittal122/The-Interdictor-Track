@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Activity, Cpu, Zap, AlertTriangle, Server, Thermometer } from "lucide-react";
+import { Activity, Cpu, Zap, AlertTriangle, Server, Thermometer, Wifi, FlaskConical } from "lucide-react";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
+import { useAppMode } from "../contexts/AppModeContext";
 
 // --- Types ---
 interface ServerUnit {
@@ -62,16 +63,19 @@ const statusGlow: Record<string, string> = {
 
 export function ComputeClusters() {
     const { telemetry } = useSocket();
+    const { mode } = useAppMode();
     const [localServers, setLocalServers] = useState<ServerUnit[]>(() => generateServers());
     const [selected, setSelected] = useState<ServerUnit | null>(null);
 
+    const isLive = mode === 'live' && telemetry?.computeNodes && telemetry.computeNodes.length > 0;
+
     useEffect(() => {
-        if (telemetry?.computeNodes && telemetry.computeNodes.length > 0) return;
+        if (isLive) return; // don't simulate when we have real data
         const interval = setInterval(() => setLocalServers(generateServers()), 3000);
         return () => clearInterval(interval);
-    }, [telemetry?.computeNodes]);
+    }, [isLive]);
 
-    const servers: ServerUnit[] = telemetry?.computeNodes?.length
+    const servers: ServerUnit[] = isLive
         ? telemetry.computeNodes.map((n: any, i: number) => ({
             id: n.id,
             hostname: `${n.type} (${n.region})`,
@@ -108,8 +112,19 @@ export function ComputeClusters() {
                     <p className="text-xs text-zinc-500 uppercase tracking-wider mt-1">3D Data Center Rack Visualization</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-emerald-500 animate-pulse" />
-                    <span className="text-xs font-medium uppercase tracking-widest text-emerald-500">Live</span>
+                    {isLive ? (
+                        <>
+                            <Wifi className="h-4 w-4 text-emerald-400 animate-pulse" />
+                            <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">
+                                Live · {telemetry.computeNodes.length} AWS EC2
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            <FlaskConical className="h-4 w-4 text-yellow-400 animate-pulse" />
+                            <span className="text-xs font-medium uppercase tracking-widest text-yellow-400">Demo Simulation</span>
+                        </>
+                    )}
                 </div>
             </div>
 

@@ -1,53 +1,99 @@
-import { EC2Client, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
+import { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand } from "@aws-sdk/client-ec2";
 import { GetCostAndUsageCommand, CostExplorerClient } from "@aws-sdk/client-cost-explorer";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const hasAwsCredentials = !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
-const region = process.env.AWS_REGION || "us-east-1";
+// Server-level fallback credentials from .env (used by background alerting worker)
+const SERVER_AWS_KEY = process.env.AWS_ACCESS_KEY_ID;
+const SERVER_AWS_SECRET = process.env.AWS_SECRET_ACCESS_KEY;
+const SERVER_AWS_REGION = process.env.AWS_REGION || "us-east-1";
 
-let ec2Client: EC2Client | null = null;
-let ceClient: CostExplorerClient | null = null;
+// ── Credential resolution ─────────────────────────────────────────────────
+// Per-request credentials always take precedence over server-level .env values.
+// If neither is present, the service returns null (falls to simulation).
+export interface PerRequestCredentials {
+    awsAccessKeyId: string;
+    awsSecretKey: string;
+    awsRegion: string;
+}
 
-if (hasAwsCredentials) {
-    ec2Client = new EC2Client({ region });
-    ceClient = new CostExplorerClient({ region });
-    console.log("🌩️  AWS Integration Active: Credentials detected.");
-} else {
-    console.log("☁️  AWS Integration Offline: Using robust simulation fallback. (Add AWS keys to .env to integrate real EC2 data)");
+function resolveCredentials(perRequest?: PerRequestCredentials | null) {
+    if (perRequest?.awsAccessKeyId && perRequest?.awsSecretKey) {
+        return {
+            credentials: {
+                accessKeyId: perRequest.awsAccessKeyId,
+                secretAccessKey: perRequest.awsSecretKey,
+            },
+            region: perRequest.awsRegion || SERVER_AWS_REGION,
+            source: "per-request" as const,
+        };
+    }
+    if (SERVER_AWS_KEY && SERVER_AWS_SECRET) {
+        return {
+            credentials: {
+                accessKeyId: SERVER_AWS_KEY,
+                secretAccessKey: SERVER_AWS_SECRET,
+            },
+            region: SERVER_AWS_REGION,
+            source: "server-env" as const,
+        };
+    }
+    return null;
 }
 
 export class AwsIntegrationService {
     /**
-     * Fetches real EC2 instances if credentials exist, otherwise returns null 
-     * (so telemetry service can fallback to simulation).
+     * Validates credentials by doing a lightweight DescribeRegions call.
+     * Returns true if valid, throws on failure.
      */
-    async getComputeNodes() {
-        if (!ec2Client) return null;
+    async validateCredentials(creds: PerRequestCredentials): Promise<boolean> {
+        const resolved = resolveCredentials(creds);
+        if (!resolved) throw new Error("No credentials provided");
+
+        const client = new EC2Client({
+            region: resolved.region,
+            credentials: resolved.credentials,
+        });
 
         try {
-            const command = new DescribeInstancesCommand({});
-            const response = await ec2Client.send(command);
+            await client.send(new DescribeRegionsCommand({ AllRegions: false }));
+            return true;
+        } catch (err: any) {
+            throw new Error(`AWS credential validation failed: ${err.code || err.message}`);
+        }
+    }
 
+    /**
+     * Fetches real EC2 instances using per-request or .env credentials.
+     * Returns null if no credentials are available (falls to simulation).
+     */
+    async getComputeNodes(perRequest?: PerRequestCredentials | null) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) return null;
+
+        const ec2Client = new EC2Client({
+            region: resolved.region,
+            credentials: resolved.credentials,
+        });
+
+        try {
+            const response = await ec2Client.send(new DescribeInstancesCommand({}));
             const nodes: any[] = [];
 
             response.Reservations?.forEach(res => {
                 res.Instances?.forEach(inst => {
-                    // Extract Name tag
                     const nameTag = inst.Tags?.find(t => t.Key === 'Name')?.Value || inst.InstanceId;
-
                     nodes.push({
                         id: nameTag,
                         instanceId: inst.InstanceId,
-                        region: inst.Placement?.AvailabilityZone || region,
+                        region: inst.Placement?.AvailabilityZone || resolved.region,
                         type: inst.InstanceType,
                         status: inst.State?.Name === 'running' ? 'running' : 'stopped',
-                        // Mock CPU/Mem for now as real metrics require CloudWatch calls per instance
                         cpu: inst.State?.Name === 'running' ? Math.floor(Math.random() * 60) + 10 : 0,
                         memory: inst.State?.Name === 'running' ? Math.floor(Math.random() * 50) + 20 : 0,
                         uptime: inst.LaunchTime ? this.getUptime(inst.LaunchTime) : "0h",
-                        rack: "AWS-CLOUD"
+                        rack: `AWS-${resolved.region.toUpperCase()}`
                     });
                 });
             });
@@ -60,25 +106,31 @@ export class AwsIntegrationService {
     }
 
     /**
-     * Fetches real AWS billing data for the current month if credentials exist.
+     * Fetches current-month billing data using per-request or .env credentials.
      */
-    async getBillingData() {
-        if (!ceClient) return null;
+    async getBillingData(perRequest?: PerRequestCredentials | null) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) return null;
+
+        // Cost Explorer is only available in us-east-1
+        const ceClient = new CostExplorerClient({
+            region: "us-east-1",
+            credentials: resolved.credentials,
+        });
 
         try {
             const end = new Date();
             const start = new Date(end.getFullYear(), end.getMonth(), 1);
 
-            const command = new GetCostAndUsageCommand({
+            const res = await ceClient.send(new GetCostAndUsageCommand({
                 TimePeriod: {
                     Start: start.toISOString().split('T')[0],
                     End: end.toISOString().split('T')[0]
                 },
                 Granularity: "MONTHLY",
                 Metrics: ["UnblendedCost"]
-            });
+            }));
 
-            const res = await ceClient.send(command);
             const cost = res.ResultsByTime?.[0]?.Total?.UnblendedCost?.Amount || "0";
             return parseFloat(cost);
         } catch (error) {
