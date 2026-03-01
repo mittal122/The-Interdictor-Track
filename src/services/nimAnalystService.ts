@@ -4,16 +4,17 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const NVIDIA_API_KEY = process.env.NVIDIA_NIM_API_KEY;
-const NVIDIA_MODEL = process.env.NVIDIA_NIM_MODEL || "meta/llama-3.1-8b-instruct";
+const NVIDIA_MODEL = process.env.NVIDIA_NIM_MODEL || "openai/gpt-oss-120b";
 
-let nimClient: OpenAI | null = null;
+const nimClient = new OpenAI({
+    apiKey: NVIDIA_API_KEY || "not-set",
+    baseURL: "https://integrate.api.nvidia.com/v1",
+});
 
-if (NVIDIA_API_KEY && !NVIDIA_API_KEY.includes("nvapi-your-key-here")) {
-    nimClient = new OpenAI({
-        apiKey: NVIDIA_API_KEY,
-        baseURL: "https://integrate.api.nvidia.com/v1",
-    });
-    console.log(`🤖 NVIDIA NIM Active: Using model \`${NVIDIA_MODEL}\``);
+const hasValidKey = !!NVIDIA_API_KEY && !NVIDIA_API_KEY.includes("nvapi-your-key-here");
+
+if (hasValidKey) {
+    console.log(`🤖 NVIDIA NIM Active → model: ${NVIDIA_MODEL}`);
 } else {
     console.log("🤖 NVIDIA NIM Offline: Add NVIDIA_NIM_API_KEY to .env to enable AI Analyst.");
 }
@@ -58,7 +59,13 @@ Communication style:
 - Be specific with numbers, thresholds, and SLAs
 - Always provide 3 concrete next steps
 
-Format your response as valid JSON with keys: summary, severity, recommendations (array of 3), estimatedImpact`;
+CRITICAL: Respond with ONLY a raw JSON object (no markdown, no code fences). Structure:
+{
+  "summary": "...",
+  "severity": "low|medium|high|critical",
+  "recommendations": ["step 1", "step 2", "step 3"],
+  "estimatedImpact": "..."
+}`;
 }
 
 function buildUserPrompt(req: AnalysisRequest): string {
@@ -66,18 +73,21 @@ function buildUserPrompt(req: AnalysisRequest): string {
     const healthStatus = telemetrySnapshot.globalHealth < 75 ? "DEGRADED" :
         telemetrySnapshot.globalHealth < 90 ? "WARNING" : "HEALTHY";
 
+    const maxRegion = telemetrySnapshot.serverLoad?.sort((a, b) => b.load - a.load)[0];
+
     return `ANALYSIS TYPE: ${analysisType.toUpperCase()}
-TELEMETRY SNAPSHOT (real-time):
+
+LIVE TELEMETRY SNAPSHOT:
 - Global Health: ${telemetrySnapshot.globalHealth.toFixed(1)}% [${healthStatus}]
-- Network Latency: ${telemetrySnapshot.networkLatency.toFixed(0)}ms ${telemetrySnapshot.networkLatency > 100 ? "⚠️ HIGH" : "✅"}
-- CPU Load: ${telemetrySnapshot.cpuUsage.toFixed(1)}% ${telemetrySnapshot.cpuUsage > 80 ? "⚠️ HIGH" : "✅"}
+- Network Latency: ${telemetrySnapshot.networkLatency.toFixed(0)}ms ${telemetrySnapshot.networkLatency > 100 ? "⚠️ HIGH" : "✅ OK"}
+- CPU Load: ${telemetrySnapshot.cpuUsage.toFixed(1)}% ${telemetrySnapshot.cpuUsage > 80 ? "⚠️ HIGH" : "✅ OK"}
 - Memory Utilization: ${telemetrySnapshot.memoryUsage.toFixed(1)}%
 - Active Anomalies: ${telemetrySnapshot.activeAnomalies}
 - Offline Nodes: ${telemetrySnapshot.offlineNodes} / ${telemetrySnapshot.totalNodes} total
-${telemetrySnapshot.serverLoad ? `- Highest Region Load: ${Math.max(...telemetrySnapshot.serverLoad.map(r => r.load)).toFixed(0)}% (${telemetrySnapshot.serverLoad.sort((a, b) => b.load - a.load)[0]?.region})` : ""}
-${customContext ? `\nADDITIONAL CONTEXT: ${customContext}` : ""}
+${maxRegion ? `- Highest Region Load: ${maxRegion.load.toFixed(0)}% (${maxRegion.region})` : ""}
+${customContext ? `\nADDITIONAL CONTEXT FROM OPERATOR: ${customContext}` : ""}
 
-Generate a JSON incident analysis for this snapshot. Return ONLY raw JSON, no markdown.`;
+Generate a JSON incident analysis for this snapshot. Return ONLY raw JSON.`;
 }
 
 function generateFallbackResponse(req: AnalysisRequest): AnalysisResponse {
@@ -94,17 +104,17 @@ function generateFallbackResponse(req: AnalysisRequest): AnalysisResponse {
     const issueStr = issues.length > 0 ? issues.join(", ") : "all systems nominal";
 
     return {
-        summary: `[SIMULATION MODE] Current system status shows ${issueStr}. Global health at ${telemetrySnapshot.globalHealth.toFixed(1)}% with ${telemetrySnapshot.activeAnomalies} active anomalies. Add NVIDIA_NIM_API_KEY to .env for real AI-powered analysis.`,
+        summary: `[SIMULATION MODE] ${issueStr.charAt(0).toUpperCase() + issueStr.slice(1)} detected. Global health at ${telemetrySnapshot.globalHealth.toFixed(1)}% with ${telemetrySnapshot.activeAnomalies} active anomalies. Add NVIDIA_NIM_API_KEY to .env for real AI-powered analysis via ARIA.`,
         severity,
         recommendations: [
-            issues.length > 0 ? `Investigate root cause of ${issues[0]} immediately` : "Monitor telemetry for any anomaly spikes",
-            `Review Access Logs for unauthorized activity patterns over the last 24 hours`,
-            `Validate system health across all ${telemetrySnapshot.totalNodes} nodes — ensure redundancies are active`
+            issues.length > 0 ? `Escalate investigation into ${issues[0]} using runbook INT-${Math.floor(Math.random() * 900) + 100}` : "Maintain current watch posture — no anomalies detected",
+            `Cross-reference Access Logs for unauthorized activity in the last 24 hours`,
+            `Validate redundancy health across all ${telemetrySnapshot.totalNodes} nodes and confirm failover readiness`
         ],
-        estimatedImpact: severity === "critical" ? "HIGH – SLA breach risk in < 15 minutes" :
-            severity === "high" ? "MEDIUM – potential degradation for 5-10% of users" :
-                severity === "medium" ? "LOW – monitoring recommended, no immediate action" :
-                    "NONE – all systems within operational parameters",
+        estimatedImpact: severity === "critical" ? "HIGH – SLA breach risk within 15 minutes" :
+            severity === "high" ? "MEDIUM – up to 5-10% of requests may degrade" :
+                severity === "medium" ? "LOW – monitor closely, no immediate user impact" :
+                    "NONE – operating within all SLO parameters",
         model: "simulation-engine",
         latencyMs: 0,
         isSimulated: true
@@ -112,45 +122,69 @@ function generateFallbackResponse(req: AnalysisRequest): AnalysisResponse {
 }
 
 export async function runAnalysis(req: AnalysisRequest): Promise<AnalysisResponse> {
-    const startTime = Date.now();
-
-    if (!nimClient) {
+    if (!hasValidKey) {
         return generateFallbackResponse(req);
     }
 
+    const startTime = Date.now();
+
     try {
-        const completion = await nimClient.chat.completions.create({
+        // Create a streaming chat completion — matches the user's Python pattern exactly
+        const stream = await nimClient.chat.completions.create({
             model: NVIDIA_MODEL,
             messages: [
                 { role: "system", content: buildSystemPrompt() },
                 { role: "user", content: buildUserPrompt(req) }
             ],
-            max_tokens: 512,
-            temperature: 0.3,
+            temperature: 1,
+            top_p: 1,
+            max_tokens: 4096,
+            stream: true,
         });
 
-        const rawText = completion.choices[0]?.message?.content || "{}";
+        // Accumulate streamed chunks into a full response string
+        let fullText = "";
+        for await (const chunk of stream) {
+            if (!chunk.choices || chunk.choices.length === 0) continue;
+
+            const delta = chunk.choices[0].delta;
+
+            // Support reasoning_content (used by some NIM reasoning models)
+            const reasoning = (delta as any).reasoning_content;
+            if (reasoning) {
+                // Reasoning tokens don't need to be surfaced in the UI response
+                continue;
+            }
+
+            if (delta.content) {
+                fullText += delta.content;
+            }
+        }
+
         const latencyMs = Date.now() - startTime;
 
-        // Parse JSON from response
+        // Parse the JSON from the response
         let parsed: any = {};
         try {
-            // Strip markdown fences if model included them
-            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+            const jsonMatch = fullText.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 parsed = JSON.parse(jsonMatch[0]);
             }
         } catch {
-            parsed = { summary: rawText };
+            parsed = { summary: fullText };
         }
 
+        const validSeverities = ["low", "medium", "high", "critical"];
+
         return {
-            summary: parsed.summary || rawText,
-            severity: (["low", "medium", "high", "critical"].includes(parsed.severity?.toLowerCase()))
+            summary: parsed.summary || fullText || "Analysis complete — no structured response returned.",
+            severity: validSeverities.includes(parsed.severity?.toLowerCase())
                 ? parsed.severity.toLowerCase()
                 : "medium",
-            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : ["Review system metrics", "Check Access Logs", "Validate node health"],
-            estimatedImpact: parsed.estimatedImpact || "Analysis complete",
+            recommendations: Array.isArray(parsed.recommendations)
+                ? parsed.recommendations.slice(0, 3)
+                : ["Review system metrics", "Check Access Logs", "Validate node health"],
+            estimatedImpact: parsed.estimatedImpact || "See summary for details",
             model: NVIDIA_MODEL,
             latencyMs,
             isSimulated: false
@@ -159,7 +193,7 @@ export async function runAnalysis(req: AnalysisRequest): Promise<AnalysisRespons
     } catch (error: any) {
         console.error("NVIDIA NIM API Error:", error?.message);
         const fallback = generateFallbackResponse(req);
-        fallback.summary = `⚠️ NIM API Error: ${error?.message}. ${fallback.summary}`;
+        fallback.summary = `⚠️ NIM API Error: ${error?.message}. Falling back to simulation. ` + fallback.summary;
         return fallback;
     }
 }
