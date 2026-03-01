@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight, LayoutDashboard, Settings, ShieldAlert, Terminal, Activity, Database, Network, LogOut } from "lucide-react";
+import { ChevronDown, ChevronRight, LayoutDashboard, Settings, ShieldAlert, Terminal, Activity, Database, Network, LogOut, Brain } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../utils/cn";
 import { useAuth } from "../contexts/AuthContext";
@@ -31,6 +31,7 @@ const navigation: NavItemType[] = [
     ],
   },
   { name: "System Config", icon: Settings, path: "/system-config" },
+  { name: "ARIA AI Analyst", icon: Brain, path: "/ai-analyst" },
 ];
 
 function Server(props: any) {

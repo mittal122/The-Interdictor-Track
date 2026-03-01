@@ -11,6 +11,7 @@ import { exec } from "child_process";
 import dotenv from "dotenv";
 import { TelemetryService } from "./src/services/telemetryService";
 import { AlertingWorker } from "./src/services/alertingWorker";
+import { runAnalysis } from "./src/services/nimAnalystService";
 import pool from "./src/services/db";
 
 dotenv.config();
@@ -85,6 +86,28 @@ async function startServer() {
     } catch (err) {
       console.error("Database error during login:", err);
       return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── NVIDIA NIM AI Analyst endpoint ───────────────────────────────────
+  app.post("/api/ai/analyze", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      // Validate token
+      const token = authHeader.slice(7);
+      jwt.verify(token, JWT_SECRET);
+
+      const analysis = await runAnalysis(req.body);
+      return res.json(analysis);
+    } catch (err: any) {
+      if (err.name === "JsonWebTokenError") {
+        return res.status(401).json({ message: "Invalid token" });
+      }
+      console.error("AI Analyst error:", err);
+      return res.status(500).json({ message: "Analysis service error" });
     }
   });
 
