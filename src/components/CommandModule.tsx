@@ -80,7 +80,7 @@ export function CommandModule() {
             disabled={status === "executing"}
           />
         </div>
-        
+
         <div className="relative group">
           <button
             type="submit"
@@ -90,11 +90,17 @@ export function CommandModule() {
             <Send className="h-4 w-4" />
             Execute
           </button>
-          
+
           {/* Tooltip */}
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded bg-zinc-800 p-2 text-xs text-zinc-300 shadow-lg group-hover:block border border-zinc-700 z-10">
-            <div className="font-semibold text-zinc-100 mb-1 uppercase tracking-wider">Warning</div>
-            This action will simulate a command execution on the primary node. Use 'fail' in the command to simulate an error.
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-72 rounded bg-zinc-800 p-3 text-xs text-zinc-300 shadow-lg group-hover:block border border-zinc-700 z-10">
+            <div className="font-semibold text-zinc-100 mb-1 uppercase tracking-wider">Security Notice</div>
+            <p className="mb-2">Only whitelisted commands are permitted. Non-approved commands will be instantly rejected.</p>
+            <div className="font-semibold text-zinc-400 mb-1 uppercase tracking-wider text-[10px]">Approved Commands:</div>
+            <div className="font-mono text-emerald-400/80 text-[10px] space-y-0.5">
+              <div>ping, uptime, whoami, hostname</div>
+              <div>systeminfo, ipconfig, dir, echo</div>
+              <div>node --version, npm --version</div>
+            </div>
             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-800"></div>
           </div>
         </div>
@@ -104,5 +110,5 @@ export function CommandModule() {
 }
 
 function Activity(props: any) {
-  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>;
+  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>;
 }

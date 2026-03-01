@@ -1,25 +1,18 @@
-import Database from 'better-sqlite3';
-import bcrypt from 'bcrypt';
+import { Pool } from 'pg';
+import dotenv from 'dotenv';
 
-const db = new Database('interdictor.db');
+dotenv.config();
 
-// Initialize database schema
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL
-  )
-`);
+const pool = new Pool({
+  host: process.env.PG_HOST || 'localhost',
+  port: parseInt(process.env.PG_PORT || '5432'),
+  user: process.env.PG_USER || 'interdictor',
+  password: process.env.PG_PASSWORD || 'interdictor',
+  database: process.env.PG_DATABASE || 'interdictor_db',
+});
 
-// Seed initial users if they don't exist
-const insertUser = db.prepare('INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)');
+pool.on('error', (err) => {
+  console.error('Unexpected PostgreSQL pool error:', err);
+});
 
-const adminHash = bcrypt.hashSync('admin', 10);
-const viewerHash = bcrypt.hashSync('viewer', 10);
-
-insertUser.run('admin', adminHash, 'admin');
-insertUser.run('viewer', viewerHash, 'viewer');
-
-export default db;
+export default pool;

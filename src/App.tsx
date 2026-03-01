@@ -6,6 +6,11 @@ import { Login } from "./pages/Login";
 import { DashboardLayout } from "./layouts/DashboardLayout";
 import { Dashboard } from "./components/Dashboard";
 import { ThreatMap } from "./pages/ThreatMap";
+import { StorageArrays } from "./pages/StorageArrays";
+import { ComputeClusters } from "./pages/ComputeClusters";
+import { GlobalNodes } from "./pages/GlobalNodes";
+import { AccessLogs } from "./pages/AccessLogs";
+import { SystemConfig } from "./pages/SystemConfig";
 
 export default function App() {
   return (
@@ -18,6 +23,11 @@ export default function App() {
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard telemetry={null} />} />
               <Route path="threat-map" element={<ThreatMap />} />
+              <Route path="storage-arrays" element={<StorageArrays />} />
+              <Route path="compute-clusters" element={<ComputeClusters />} />
+              <Route path="global-nodes" element={<GlobalNodes />} />
+              <Route path="access-logs" element={<AccessLogs />} />
+              <Route path="system-config" element={<SystemConfig />} />
             </Route>
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>

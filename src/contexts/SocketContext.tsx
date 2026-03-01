@@ -23,12 +23,17 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const newSocket = io({
-      auth: { token }
+    // Auto-detect protocol: use wss:// on HTTPS, ws:// on HTTP
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const newSocket = io(window.location.origin, {
+      auth: { token },
+      transports: ['websocket'],
+      secure: protocol === 'wss',
+      rejectUnauthorized: false, // Allow self-signed certs in dev
     });
 
     newSocket.on('connect', () => {
-      console.log('Connected to telemetry stream');
+      console.log(`Connected to telemetry stream (${protocol})`);
     });
 
     newSocket.on('telemetry_update', (data) => {

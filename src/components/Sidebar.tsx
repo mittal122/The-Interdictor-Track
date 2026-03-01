@@ -17,9 +17,9 @@ const navigation: NavItemType[] = [
     name: "Infrastructure",
     icon: Database,
     children: [
-      { name: "Global Nodes", icon: Network },
-      { name: "Compute Clusters", icon: Server },
-      { name: "Storage Arrays", icon: Database },
+      { name: "Global Nodes", icon: Network, path: "/global-nodes" },
+      { name: "Compute Clusters", icon: Server, path: "/compute-clusters" },
+      { name: "Storage Arrays", icon: Database, path: "/storage-arrays" },
     ],
   },
   {
@@ -27,14 +27,14 @@ const navigation: NavItemType[] = [
     icon: ShieldAlert,
     children: [
       { name: "Threat Map", icon: Activity, path: "/threat-map" },
-      { name: "Access Logs", icon: Terminal },
+      { name: "Access Logs", icon: Terminal, path: "/access-logs" },
     ],
   },
-  { name: "System Config", icon: Settings },
+  { name: "System Config", icon: Settings, path: "/system-config" },
 ];
 
 function Server(props: any) {
-  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>;
+  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="20" height="8" x="2" y="2" rx="2" ry="2" /><rect width="20" height="8" x="2" y="14" rx="2" ry="2" /><line x1="6" x2="6.01" y1="6" y2="6" /><line x1="6" x2="6.01" y1="18" y2="18" /></svg>;
 }
 
 export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => void }) {
@@ -129,7 +129,7 @@ function NavItem({
   const content = (
     <>
       <item.icon className={cn("h-4 w-4 shrink-0", depth > 0 && "h-3.5 w-3.5", isActive && "text-zinc-100")} />
-      
+
       {isOpen && (
         <>
           <span className={cn("flex-1 text-left truncate", isActive && "text-zinc-100 font-semibold")}>{item.name}</span>
@@ -173,7 +173,7 @@ function NavItem({
               item={child}
               isOpen={isOpen}
               isExpanded={false}
-              onToggle={() => {}}
+              onToggle={() => { }}
               depth={depth + 1}
             />
           ))}

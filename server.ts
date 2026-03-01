@@ -1,40 +1,80 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import { createServer } from "http";
+import https from "https";
+import fs from "fs";
+import path from "path";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { exec } from "child_process";
+import dotenv from "dotenv";
 import { TelemetryService } from "./src/services/telemetryService";
-import db from "./src/services/db";
+import pool from "./src/services/db";
+
+dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-interdictor-key";
 
+// ── Security: Command Whitelist ──────────────────────────────────────
+// Only commands in this list (or whose base binary matches) are allowed.
+const COMMAND_WHITELIST = [
+  'ping',
+  'uptime',
+  'whoami',
+  'hostname',
+  'systeminfo',
+  'ipconfig',
+  'npm run status',
+  'node --version',
+  'npm --version',
+  'dir',
+  'echo',
+];
+
 async function startServer() {
   const app = express();
-  const httpServer = createServer(app);
+
+  // ── HTTPS / HTTP Server Selection ────────────────────────────────
+  let httpServer;
+  const certPath = path.resolve('certs/cert.pem');
+  const keyPath = path.resolve('certs/key.pem');
+
+  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    const sslOptions = {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+    httpServer = https.createServer(sslOptions, app);
+    console.log('🔒 HTTPS mode: SSL/TLS certificates loaded from certs/');
+  } else {
+    httpServer = createServer(app);
+    console.log('⚠️  HTTP mode: No SSL certificates found in certs/. Run scripts/generate-certs.ps1 to enable HTTPS.');
+  }
+
   const io = new Server(httpServer, {
     cors: {
       origin: "*",
       methods: ["GET", "POST"]
     }
   });
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '3000');
 
   app.use(express.json());
 
-  // Auth endpoint using SQLite Database
-  app.post("/api/auth/login", (req, res) => {
+  // ── Auth endpoint using PostgreSQL ──────────────────────────────
+  app.post("/api/auth/login", async (req, res) => {
     const { username, password } = req.body;
-    
+
     try {
-      const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any;
-      
+      const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+      const user = result.rows[0];
+
       if (!user) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      const match = bcrypt.compareSync(password, user.password);
+      const match = await bcrypt.compare(password, user.password);
       if (!match) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
@@ -66,14 +106,31 @@ async function startServer() {
   io.on("connection", (socket) => {
     console.log(`User connected: ${socket.data.user.username} (${socket.data.user.role})`);
 
-    // Real Command execution handler using child_process
+    // ── Command execution with whitelist enforcement ──────────────
     socket.on("execute_command", (data, callback) => {
+      // Role check
       if (socket.data.user.role !== "admin") {
         return callback({ status: "error", message: "Unauthorized: Admin role required." });
       }
 
-      console.log(`Command received from ${socket.data.user.username}: ${data.command}`);
-      
+      const trimmedCommand = data.command.trim();
+      const baseCommand = trimmedCommand.split(/\s+/)[0].toLowerCase();
+
+      // Whitelist check: match exact full command OR the base binary name
+      const isWhitelisted = COMMAND_WHITELIST.some(
+        (cmd) => cmd === trimmedCommand.toLowerCase() || cmd === baseCommand
+      );
+
+      if (!isWhitelisted) {
+        console.warn(`🚫 BLOCKED command from ${socket.data.user.username}: ${data.command}`);
+        return callback({
+          status: "error",
+          message: `SECURITY BLOCK: Command "${baseCommand}" is not on the approved whitelist. Allowed: ${COMMAND_WHITELIST.join(', ')}`
+        });
+      }
+
+      console.log(`✅ Command approved from ${socket.data.user.username}: ${data.command}`);
+
       // Execute real backend command
       exec(data.command, { timeout: 10000 }, (error, stdout, stderr) => {
         if (error) {
@@ -81,7 +138,7 @@ async function startServer() {
           callback({ status: "error", message: stderr || error.message });
           return;
         }
-        
+
         callback({ status: "success", message: stdout || "Command executed silently." });
       });
     });
@@ -112,8 +169,9 @@ async function startServer() {
     app.use(express.static("dist"));
   }
 
+  const protocol = fs.existsSync(certPath) ? 'https' : 'http';
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on ${protocol}://localhost:${PORT}`);
   });
 }
 
