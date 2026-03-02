@@ -65,42 +65,69 @@ export class AwsIntegrationService {
     }
 
     /**
-     * Fetches real EC2 instances using per-request or .env credentials.
+     * Fetches real EC2 instances across ALL AWS regions using per-request or .env credentials.
      * Returns null if no credentials are available (falls to simulation).
      */
     async getComputeNodes(perRequest?: PerRequestCredentials | null) {
         const resolved = resolveCredentials(perRequest);
         if (!resolved) return null;
 
-        const ec2Client = new EC2Client({
-            region: resolved.region,
-            credentials: resolved.credentials,
-        });
-
         try {
-            const response = await ec2Client.send(new DescribeInstancesCommand({}));
+            // 1. First, get all enabled regions using the default resolved region
+            const initialClient = new EC2Client({
+                region: resolved.region,
+                credentials: resolved.credentials,
+            });
+            const regionResponse = await initialClient.send(new DescribeRegionsCommand({ AllRegions: false }));
+            const regionsToCheck = (regionResponse.Regions || [])
+                .map(r => r.RegionName)
+                .filter((r): r is string => !!r);
+
+            if (regionsToCheck.length === 0) {
+                // Fallback to just the main region if DescribeRegions fails but doesn't throw
+                regionsToCheck.push(resolved.region);
+            }
+
+            console.log(`[AWS] Fetching instances across ${regionsToCheck.length} regions...`);
+
             const nodes: any[] = [];
 
-            response.Reservations?.forEach(res => {
-                res.Instances?.forEach(inst => {
-                    const nameTag = inst.Tags?.find(t => t.Key === 'Name')?.Value || inst.InstanceId;
-                    nodes.push({
-                        id: nameTag,
-                        instanceId: inst.InstanceId,
-                        region: inst.Placement?.AvailabilityZone || resolved.region,
-                        type: inst.InstanceType,
-                        status: inst.State?.Name === 'running' ? 'running' : 'stopped',
-                        cpu: inst.State?.Name === 'running' ? Math.floor(Math.random() * 60) + 10 : 0,
-                        memory: inst.State?.Name === 'running' ? Math.floor(Math.random() * 50) + 20 : 0,
-                        uptime: inst.LaunchTime ? this.getUptime(inst.LaunchTime) : "0h",
-                        rack: `AWS-${resolved.region.toUpperCase()}`
-                    });
+            // 2. Fetch instances from all regions concurrently
+            const fetchPromises = regionsToCheck.map(async (regionName) => {
+                const regionalClient = new EC2Client({
+                    region: regionName,
+                    credentials: resolved.credentials,
                 });
+
+                try {
+                    const response = await regionalClient.send(new DescribeInstancesCommand({}));
+                    response.Reservations?.forEach(res => {
+                        res.Instances?.forEach(inst => {
+                            const nameTag = inst.Tags?.find(t => t.Key === 'Name')?.Value || inst.InstanceId;
+                            nodes.push({
+                                id: `${regionName}-${inst.InstanceId}`, // Ensure unique ID across regions
+                                instanceId: inst.InstanceId,
+                                region: inst.Placement?.AvailabilityZone?.slice(0, -1) || regionName, // Map az to region roughly
+                                type: inst.InstanceType,
+                                status: inst.State?.Name === 'running' ? 'running' : inst.State?.Name === 'pending' ? 'pending' : 'stopped',
+                                cpu: inst.State?.Name === 'running' ? Math.floor(Math.random() * 60) + 10 : 0,
+                                memory: inst.State?.Name === 'running' ? Math.floor(Math.random() * 50) + 20 : 0,
+                                uptime: inst.LaunchTime ? this.getUptime(inst.LaunchTime) : "0h",
+                                rack: `AWS-${regionName.toUpperCase()}`
+                            });
+                        });
+                    });
+                } catch (regionalErr) {
+                    console.error(`[AWS] Error fetching instances in ${regionName}:`, regionalErr);
+                }
             });
+
+            // Wait for all regional fetches to complete
+            await Promise.all(fetchPromises);
 
             return nodes;
         } catch (error) {
-            console.error("AWS EC2 Fetch Error:", error);
+            console.error("AWS EC2 Global Fetch Error:", error);
             return null;
         }
     }
