@@ -17,6 +17,7 @@ export interface TelemetryData {
   memoryUsage: number;
   computeNodes?: any[] | null;
   billingData?: number | null;
+  storageArrays?: any[] | null;
 }
 
 export class TelemetryService {
@@ -151,6 +152,7 @@ export class TelemetryService {
   async getAggregatedTelemetry(credentials?: PerRequestCredentials | null): Promise<TelemetryData> {
     const computeNodes = await this.awsService.getComputeNodes(credentials);
     const billingData = await this.awsService.getBillingData(credentials);
+    const storageArrays = await this.awsService.getStorageVolumes(credentials);
 
     const [health, latency, anomalies, load, compute] = await Promise.all([
       this.fetchGlobalHealth(credentials, computeNodes),
@@ -170,6 +172,7 @@ export class TelemetryService {
       memoryUsage: compute.memory,
       computeNodes,
       billingData,
+      storageArrays,
     };
   }
 }

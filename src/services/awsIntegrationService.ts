@@ -1,4 +1,4 @@
-import { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand } from "@aws-sdk/client-ec2";
+import { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand, DescribeVolumesCommand } from "@aws-sdk/client-ec2";
 import { GetCostAndUsageCommand, CostExplorerClient } from "@aws-sdk/client-cost-explorer";
 import { CloudWatchClient, GetMetricStatisticsCommand } from "@aws-sdk/client-cloudwatch";
 import { GuardDutyClient, ListDetectorsCommand, GetFindingsStatisticsCommand } from "@aws-sdk/client-guardduty";
@@ -46,6 +46,7 @@ function resolveCredentials(perRequest?: PerRequestCredentials | null) {
 
 export class AwsIntegrationService {
     private nodesCache = new Map<string, { data: any[], timestamp: number }>();
+    private volumesCache = new Map<string, { data: any[], timestamp: number }>();
     private CACHE_TTL_MS = 15000; // 15 seconds for expensive global fetches
 
     /**
@@ -141,6 +142,72 @@ export class AwsIntegrationService {
             return nodes;
         } catch (error) {
             console.error("AWS EC2 Global Fetch Error:", error);
+            return null;
+        }
+    }
+
+    /**
+     * Fetches real EBS Storage Volumes across ALL AWS regions.
+     */
+    async getStorageVolumes(perRequest?: PerRequestCredentials | null) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) return null;
+
+        const cacheKey = resolved.credentials.accessKeyId;
+        const cached = this.volumesCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+            return cached.data;
+        }
+
+        try {
+            // First, get all enabled regions using the default resolved region
+            const initialClient = new EC2Client({
+                region: resolved.region,
+                credentials: resolved.credentials,
+            });
+            const regionResponse = await initialClient.send(new DescribeRegionsCommand({ AllRegions: false }));
+            const regionsToCheck = (regionResponse.Regions || [])
+                .map(r => r.RegionName)
+                .filter((r): r is string => !!r);
+
+            if (regionsToCheck.length === 0) {
+                regionsToCheck.push(resolved.region);
+            }
+
+            const volumes: any[] = [];
+
+            const fetchPromises = regionsToCheck.map(async (regionName) => {
+                const regionalClient = new EC2Client({
+                    region: regionName,
+                    credentials: resolved.credentials,
+                });
+
+                try {
+                    const response = await regionalClient.send(new DescribeVolumesCommand({}));
+                    response.Volumes?.forEach(vol => {
+                        const nameTag = vol.Tags?.find(t => t.Key === 'Name')?.Value || vol.VolumeType?.toUpperCase() || "EBS";
+                        volumes.push({
+                            id: vol.VolumeId,
+                            name: nameTag,
+                            capacity: vol.Size || 0, // GB
+                            status: vol.State, // 'creating' | 'available' | 'in-use' | 'deleting' | 'deleted' | 'error'
+                            type: vol.VolumeType, // 'gp2', 'gp3', 'io1', 'io2', 'st1', 'sc1', 'standard'
+                            region: regionName,
+                            iops: vol.Iops || 0,
+                            throughput: vol.Throughput || 0,
+                        });
+                    });
+                } catch (regionalErr) {
+                    // Ignore regional auth/access errors to let others succeed
+                }
+            });
+
+            await Promise.all(fetchPromises);
+
+            this.volumesCache.set(cacheKey, { data: volumes, timestamp: Date.now() });
+            return volumes;
+        } catch (error) {
+            console.error("AWS EBS Global Fetch Error:", error);
             return null;
         }
     }
