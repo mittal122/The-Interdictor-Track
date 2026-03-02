@@ -13,8 +13,10 @@
     "migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.1000.0",
     "@aws-sdk/client-cost-explorer": "^3.1000.0",
     "@aws-sdk/client-ec2": "^3.1000.0",
+    "@aws-sdk/client-guardduty": "^3.1000.0",
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@tanstack/react-virtual": "^3.13.19",

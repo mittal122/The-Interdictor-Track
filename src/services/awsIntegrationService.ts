@@ -1,5 +1,7 @@
 import { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand } from "@aws-sdk/client-ec2";
 import { GetCostAndUsageCommand, CostExplorerClient } from "@aws-sdk/client-cost-explorer";
+import { CloudWatchClient, GetMetricStatisticsCommand } from "@aws-sdk/client-cloudwatch";
+import { GuardDutyClient, ListDetectorsCommand, GetFindingsStatisticsCommand } from "@aws-sdk/client-guardduty";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -43,6 +45,9 @@ function resolveCredentials(perRequest?: PerRequestCredentials | null) {
 }
 
 export class AwsIntegrationService {
+    private nodesCache = new Map<string, { data: any[], timestamp: number }>();
+    private CACHE_TTL_MS = 15000; // 15 seconds for expensive global fetches
+
     /**
      * Validates credentials by doing a lightweight DescribeRegions call.
      * Returns true if valid, throws on failure.
@@ -71,6 +76,12 @@ export class AwsIntegrationService {
     async getComputeNodes(perRequest?: PerRequestCredentials | null) {
         const resolved = resolveCredentials(perRequest);
         if (!resolved) return null;
+
+        const cacheKey = resolved.credentials.accessKeyId;
+        const cached = this.nodesCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+            return cached.data;
+        }
 
         try {
             // 1. First, get all enabled regions using the default resolved region
@@ -125,10 +136,117 @@ export class AwsIntegrationService {
             // Wait for all regional fetches to complete
             await Promise.all(fetchPromises);
 
+            this.nodesCache.set(cacheKey, { data: nodes, timestamp: Date.now() });
+
             return nodes;
         } catch (error) {
             console.error("AWS EC2 Global Fetch Error:", error);
             return null;
+        }
+    }
+
+    /**
+     * Measures the real API latency (in ms) from our Node server to AWS.
+     */
+    async measureNetworkLatency(perRequest?: PerRequestCredentials | null) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) return null;
+
+        const client = new EC2Client({
+            region: resolved.region,
+            credentials: resolved.credentials,
+        });
+
+        const start = Date.now();
+        try {
+            await client.send(new DescribeRegionsCommand({ AllRegions: false }));
+            return Date.now() - start;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Fetches average CPU utilization across EC2 over the last 5 mins (CloudWatch).
+     */
+    async getCloudWatchCpu(perRequest?: PerRequestCredentials | null) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) return null;
+
+        const client = new CloudWatchClient({
+            region: resolved.region,
+            credentials: resolved.credentials,
+        });
+
+        const endTime = new Date();
+        const startTime = new Date(endTime.getTime() - 5 * 60 * 1000); // last 5 minutes
+
+        try {
+            const res = await client.send(new GetMetricStatisticsCommand({
+                Namespace: "AWS/EC2",
+                MetricName: "CPUUtilization",
+                Dimensions: [],
+                StartTime: startTime,
+                EndTime: endTime,
+                Period: 300,
+                Statistics: ["Average"]
+            }));
+
+            if (res.Datapoints && res.Datapoints.length > 0) {
+                // CloudWatch doesn't guarantee order, sort by timestamp descending
+                res.Datapoints.sort((a, b) => (b.Timestamp?.getTime() || 0) - (a.Timestamp?.getTime() || 0));
+                return res.Datapoints[0].Average || 0;
+            }
+            return 0; // 0% if no instances are reporting
+        } catch (error) {
+            console.error("AWS CloudWatch Error:", error);
+            return null;
+        }
+    }
+
+    /**
+     * Fetches current active finding counts from AWS GuardDuty.
+     */
+    async getGuardDutyAnomalies(perRequest?: PerRequestCredentials | null) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) return null;
+
+        const client = new GuardDutyClient({
+            region: resolved.region,
+            credentials: resolved.credentials,
+        });
+
+        try {
+            // First, get the detector ID
+            const detectors = await client.send(new ListDetectorsCommand({}));
+            const detectorId = detectors.DetectorIds?.[0];
+
+            if (!detectorId) return 0; // GuardDuty is not enabled
+
+            // Get active findings count
+            const stats = await client.send(new GetFindingsStatisticsCommand({
+                DetectorId: detectorId,
+                FindingStatisticTypes: ["COUNT_BY_SEVERITY"],
+                FindingCriteria: {
+                    Criterion: {
+                        "severity": { Gte: 1 } // All severities
+                        // Usually you might filter by 'RECORD_STATE': { Eq: ['ACTIVE'] } but keeping it simple
+                    }
+                }
+            }));
+
+            // Sum up finding counts across all severities
+            let totalFindings = 0;
+            if (stats.FindingStatistics?.CountBySeverity) {
+                for (const count of Object.values(stats.FindingStatistics.CountBySeverity)) {
+                    totalFindings += count;
+                }
+            }
+            return totalFindings;
+        } catch (error) {
+            // If they don't have GuardDuty enabled or lack permissions, just fail silently and return 0
+            console.error("AWS GuardDuty Error:", error);
+            return null; // Fallback to 0 later if needed
         }
     }
 
