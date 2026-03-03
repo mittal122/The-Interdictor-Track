@@ -15,6 +15,10 @@ import {
 import { ElasticLoadBalancingV2Client, DescribeLoadBalancersCommand, DescribeTargetGroupsCommand } from "@aws-sdk/client-elastic-load-balancing-v2";
 import { S3Client, ListBucketsCommand } from "@aws-sdk/client-s3";
 import { LambdaClient, ListFunctionsCommand } from "@aws-sdk/client-lambda";
+import { IAMClient, ListRolesCommand, ListUsersCommand, ListPoliciesCommand } from "@aws-sdk/client-iam";
+import { RDSClient, DescribeDBInstancesCommand } from "@aws-sdk/client-rds";
+import { AutoScalingClient, DescribeAutoScalingGroupsCommand } from "@aws-sdk/client-auto-scaling";
+import { Route53Client, ListHostedZonesCommand } from "@aws-sdk/client-route-53";
 import { PerRequestCredentials } from "./awsIntegrationService";
 import dotenv from "dotenv";
 
@@ -107,8 +111,12 @@ export async function getFullAccountInfrastructure(
 
         console.log(`[INFRA] Scanning ${regions.length} regions...`);
 
-        // 2. Fetch S3 (global service — only need one call)
-        await fetchS3(resolved.credentials, resolved.region, nodes);
+        // 2. Fetch Global Services (S3, IAM, Route53)
+        await Promise.allSettled([
+            fetchS3(resolved.credentials, resolved.region, nodes),
+            fetchIAM(resolved.credentials, resolved.region, nodes),
+            fetchRoute53(resolved.credentials, resolved.region, nodes),
+        ]);
 
         // 3. Fetch per-region resources in parallel
         await Promise.all(regions.map(region =>
@@ -150,6 +158,8 @@ async function fetchRegionResources(
     const ec2 = new EC2Client({ region, credentials });
     const elbClient = new ElasticLoadBalancingV2Client({ region, credentials });
     const lambdaClient = new LambdaClient({ region, credentials });
+    const rdsClient = new RDSClient({ region, credentials });
+    const asgClient = new AutoScalingClient({ region, credentials });
 
     await Promise.allSettled([
         fetchVPCs(ec2, region, nodes, edges),
@@ -163,6 +173,8 @@ async function fetchRegionResources(
         fetchElasticIPs(ec2, region, nodes),
         fetchELBs(elbClient, region, nodes, edges),
         fetchLambda(lambdaClient, region, nodes),
+        fetchRDS(rdsClient, region, nodes, edges),
+        fetchASG(asgClient, region, nodes, edges),
     ]);
 }
 
@@ -406,6 +418,130 @@ async function fetchLambda(client: LambdaClient, region: string, nodes: InfraNod
             });
         }
     } catch (e: any) { console.error(`[INFRA][${region}] Lambda error:`, e.message); }
+}
+
+async function fetchRDS(client: RDSClient, region: string, nodes: InfraNode[], edges: InfraEdge[]) {
+    try {
+        const res = await client.send(new DescribeDBInstancesCommand({}));
+        for (const db of res.DBInstances || []) {
+            const statusMap: Record<string, ResourceStatus> = { available: "active", stopped: "stopped", creating: "pending", starting: "pending", backing_up: "active" };
+            const status = statusMap[db.DBInstanceStatus || ""] || "idle";
+
+            nodes.push({
+                id: `rds-${region}-${db.DBInstanceIdentifier}`,
+                type: "rds", category: "database",
+                name: db.DBInstanceIdentifier || "RDS Instance",
+                region, status,
+                meta: {
+                    engine: db.Engine, version: db.EngineVersion,
+                    class: db.DBInstanceClass, multiAz: db.MultiAZ,
+                    storage: db.AllocatedStorage, subnetGroup: db.DBSubnetGroup?.DBSubnetGroupName
+                },
+            });
+
+            // Edge: Subnet -> RDS
+            for (const sub of db.DBSubnetGroup?.Subnets || []) {
+                if (sub.SubnetIdentifier) {
+                    edges.push({
+                        source: `subnet-${region}-${sub.SubnetIdentifier}`,
+                        target: `rds-${region}-${db.DBInstanceIdentifier}`,
+                        label: "hosts-db"
+                    });
+                }
+            }
+            // Edge: SG -> RDS
+            for (const sg of db.VpcSecurityGroups || []) {
+                if (sg.VpcSecurityGroupId) {
+                    edges.push({
+                        source: `rds-${region}-${db.DBInstanceIdentifier}`,
+                        target: `sg-${region}-${sg.VpcSecurityGroupId}`,
+                        label: "uses-sg"
+                    });
+                }
+            }
+        }
+    } catch (e: any) { console.error(`[INFRA][${region}] RDS error:`, e.message); }
+}
+
+async function fetchASG(client: AutoScalingClient, region: string, nodes: InfraNode[], edges: InfraEdge[]) {
+    try {
+        const res = await client.send(new DescribeAutoScalingGroupsCommand({}));
+        for (const asg of res.AutoScalingGroups || []) {
+            const hasInstances = (asg.Instances?.length || 0) > 0;
+
+            nodes.push({
+                id: `asg-${region}-${asg.AutoScalingGroupName}`,
+                type: "asg", category: "compute",
+                name: asg.AutoScalingGroupName || "AutoScaling Group",
+                region, status: hasInstances ? "active" : "orphan",
+                meta: {
+                    minSize: asg.MinSize, maxSize: asg.MaxSize, desiredCapacity: asg.DesiredCapacity,
+                    instanceCount: asg.Instances?.length || 0,
+                    vpcZoneIdentifier: asg.VPCZoneIdentifier
+                },
+            });
+
+            // Edge: ASG -> EC2 Instances
+            for (const inst of asg.Instances || []) {
+                if (inst.InstanceId) {
+                    edges.push({
+                        source: `asg-${region}-${asg.AutoScalingGroupName}`,
+                        target: `ec2-${region}-${inst.InstanceId}`,
+                        label: "manages"
+                    });
+                }
+            }
+        }
+    } catch (e: any) { console.error(`[INFRA][${region}] ASG error:`, e.message); }
+}
+
+async function fetchIAM(credentials: { accessKeyId: string; secretAccessKey: string }, region: string, nodes: InfraNode[]) {
+    try {
+        // IAM is global but needs a region to init client. STS/IAM usually endpoints at us-east-1
+        const client = new IAMClient({ region: "us-east-1", credentials });
+
+        // Roles
+        try {
+            const rolesRes = await client.send(new ListRolesCommand({ MaxItems: 50 })); // cap to prevent blowout
+            for (const role of rolesRes.Roles || []) {
+                // omit aws-service-role to reduce noise
+                if (role.Path?.startsWith("/aws-service-role/")) continue;
+                nodes.push({
+                    id: `iam-role-${role.RoleId}`, type: "iam-role", category: "security",
+                    name: role.RoleName || "Role", region: "global", status: "active",
+                    meta: { arn: role.Arn, createDate: role.CreateDate?.toISOString() }
+                });
+            }
+        } catch (e: any) { console.error("[INFRA] IAM Role Error:", e.message); }
+
+        // Users
+        try {
+            const usersRes = await client.send(new ListUsersCommand({ MaxItems: 50 }));
+            for (const user of usersRes.Users || []) {
+                nodes.push({
+                    id: `iam-user-${user.UserId}`, type: "iam-user", category: "security",
+                    name: user.UserName || "User", region: "global", status: "active",
+                    meta: { arn: user.Arn, createDate: user.CreateDate?.toISOString() }
+                });
+            }
+        } catch (e: any) { console.error("[INFRA] IAM User Error:", e.message); }
+
+    } catch (e: any) { console.error("[INFRA] IAM error:", e.message); }
+}
+
+async function fetchRoute53(credentials: { accessKeyId: string; secretAccessKey: string }, region: string, nodes: InfraNode[]) {
+    try {
+        // global
+        const client = new Route53Client({ region: "us-east-1", credentials });
+        const res = await client.send(new ListHostedZonesCommand({}));
+        for (const zone of res.HostedZones || []) {
+            nodes.push({
+                id: `r53-zone-${zone.Id?.split("/").pop()}`, type: "route53-zone", category: "networking",
+                name: zone.Name || "Hosted Zone", region: "global", status: "active",
+                meta: { callerReference: zone.CallerReference, recordCount: zone.ResourceRecordSetCount, privateZone: zone.Config?.PrivateZone }
+            });
+        }
+    } catch (e: any) { console.error("[INFRA] Route53 error:", e.message); }
 }
 
 // ── Orphan Detection Engine ───────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight, LayoutDashboard, Settings, ShieldAlert, Terminal, Boxes, Database, Network, LogOut, Brain, Map, Cloud } from "lucide-react";
+import { ChevronDown, ChevronRight, LayoutDashboard, Settings, ShieldAlert, Terminal, Boxes, Database, Network, LogOut, Brain, Map, Cloud, Trash2 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../utils/cn";
 import { useAuth } from "../contexts/AuthContext";
@@ -30,6 +30,7 @@ const navigation: NavItemType[] = [
     children: [
       { name: "Architecture View", icon: Boxes, path: "/aws-architecture" },
       { name: "AWS Overview", icon: Cloud, path: "/aws-overview" },
+      { name: "Unused Resources", icon: Trash2, path: "/aws-unused" },
     ],
   },
   {

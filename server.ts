@@ -323,6 +323,42 @@ async function startServer() {
       }
     });
 
+    // ── Delete Orphaned Resources ─────────────────────────────────────────
+    socket.on("delete_infrastructure_resource", async (data, callback) => {
+      if (socket.data.user.role !== "admin") {
+        return callback({ status: "error", message: "Unauthorized: Admin role required to delete resources." });
+      }
+      if (!userCreds) {
+        return callback({ status: "error", message: "Live Mode required." });
+      }
+      if (!data.id || !data.type || !data.region) {
+        return callback({ status: "error", message: "Region, Type, and ID required to delete." });
+      }
+
+      console.log(`[INFRA] Deleting ${data.type} resource: ${data.id} in ${data.region}`);
+
+      try {
+        if (data.type === "ebs") {
+          await awsValidatorService.deleteEbsVolume(userCreds, data.region, data.meta.volumeId);
+        } else if (data.type === "sg") {
+          await awsValidatorService.deleteSecurityGroup(userCreds, data.region, data.meta.sgId);
+        } else if (data.type === "eip") {
+          await awsValidatorService.releaseElasticIp(userCreds, data.region, data.meta.allocationId);
+        } else {
+          return callback({ status: "error", message: `Deletion not supported for type: ${data.type}` });
+        }
+
+        callback({ status: "success", message: `Successfully deleted ${data.id}` });
+
+        // Refresh telemetry if needed
+        const freshData = await telemetryService.getAggregatedTelemetry(userCreds);
+        socket.emit("telemetry_update", freshData);
+      } catch (err: any) {
+        console.error("Resource Deletion Error:", err);
+        callback({ status: "error", message: `Delete Failed: ${err.message}` });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`User disconnected: ${socket.data.user.username}`);
       const interval = socketIntervals.get(socket.id);

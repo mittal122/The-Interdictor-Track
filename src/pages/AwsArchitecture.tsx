@@ -2,8 +2,10 @@ import React, { useState, useMemo, useCallback } from "react";
 import {
     Cloud, Server, HardDrive, Globe2, Network, Shield, Radio, Zap, Database,
     Play, Square, Trash2, Loader2, ChevronDown, ChevronRight, AlertTriangle,
-    CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers
+    CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers, GitMerge
 } from "lucide-react";
+import ReactFlow, { Background, Controls, MarkerType, NodeProps, Handle, Position, Edge, Node as FlowNode } from 'reactflow';
+import 'reactflow/dist/style.css';
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
@@ -145,6 +147,119 @@ function StatusBadge({ status }: { status: ResourceStatus }) {
     );
 }
 
+// ── Custom ReactFlow Node ─────────────────────────────────────────────────
+function CustomNode({ data }: NodeProps) {
+    const Icon = TYPE_ICON[data.node.type] || Boxes;
+    const isSelected = data.selected;
+
+    return (
+        <div className={cn(
+            "relative flex flex-col items-center justify-center p-2 rounded-xl border-2 bg-zinc-900/90 shadow-lg min-w-[120px] transition-all",
+            isSelected ? "border-sky-500 shadow-sky-500/20" : "border-zinc-800",
+            STATUS_CONFIG[data.node.status]?.border.replace("border-", "border-t-")
+        )}>
+            {/* Handles */}
+            <Handle type="target" position={Position.Top} className="!bg-zinc-600 !w-2 !h-2 !border-none" />
+
+            <div className="flex flex-col items-center gap-1.5 p-1">
+                <div className={cn("p-1.5 rounded-lg", STATUS_CONFIG[data.node.status]?.bg)}>
+                    <Icon className={cn("h-5 w-5", STATUS_CONFIG[data.node.status]?.color)} />
+                </div>
+                <div className="text-[10px] font-bold text-zinc-200 text-center leading-tight truncate w-full px-1" title={data.node.name}>
+                    {data.node.name}
+                </div>
+                <div className="text-[8px] text-zinc-500 uppercase tracking-widest bg-zinc-800/50 px-1.5 py-0.5 rounded">
+                    {TYPE_LABEL[data.node.type] || data.node.type}
+                </div>
+            </div>
+
+            <Handle type="source" position={Position.Bottom} className="!bg-zinc-600 !w-2 !h-2 !border-none" />
+        </div>
+    );
+}
+
+const nodeTypes = { custom: CustomNode };
+
+// ── Graph Component ───────────────────────────────────────────────────────
+function ArchitectureGraph({ data, selectedNodeId, onSelect }: { data: InfraMap; selectedNodeId: string | null; onSelect: (node: InfraNode) => void }) {
+    // Simple hierarchical layout algorithm
+    const { nodes: flowNodes, edges: flowEdges } = useMemo(() => {
+        const fNodes: FlowNode[] = [];
+        const fEdges: Edge[] = [];
+        const levels: Record<string, number> = {};
+
+        // Root layer: Region -> VPC -> Subnet -> Compute/DB -> Storage
+        const catLevel: Record<string, number> = {
+            "vpc": 0, "igw": 0, "route53-zone": 0, "iam-role": 0, "iam-user": 0,
+            "subnet": 1, "route-table": 1, "nat": 1,
+            "sg": 2, "elb": 2, "target-group": 2,
+            "ec2": 3, "rds": 3, "lambda": 3, "asg": 3,
+            "ebs": 4, "eip": 4, "s3": 4
+        };
+
+        // Assign levels
+        const levelGroups: Record<number, InfraNode[]> = {};
+        for (const node of data.nodes) {
+            const l = catLevel[node.type] ?? 5;
+            if (!levelGroups[l]) levelGroups[l] = [];
+            levelGroups[l].push(node);
+        }
+
+        // Position nodes
+        Object.entries(levelGroups).forEach(([levelStr, levelNodes]) => {
+            const level = parseInt(levelStr);
+            const y = level * 150;
+            const width = levelNodes.length * 150;
+            const startX = -(width / 2);
+
+            levelNodes.forEach((node, i) => {
+                fNodes.push({
+                    id: node.id,
+                    type: "custom",
+                    position: { x: startX + (i * 150), y },
+                    data: { node, selected: node.id === selectedNodeId }
+                });
+            });
+        });
+
+        // Map edges
+        for (const edge of data.edges) {
+            fEdges.push({
+                id: `${edge.source}-${edge.target}`,
+                source: edge.source,
+                target: edge.target,
+                label: edge.label,
+                animated: true,
+                type: "smoothstep",
+                style: { stroke: "#52525b", strokeWidth: 1.5 },
+                labelStyle: { fill: "#a1a1aa", fontSize: 9, fontWeight: 700 },
+                labelBgStyle: { fill: "#18181b", color: "#fff", fillOpacity: 0.8 },
+                markerEnd: { type: MarkerType.ArrowClosed, color: "#52525b" }
+            });
+        }
+
+        return { nodes: fNodes, edges: fEdges };
+    }, [data, selectedNodeId]);
+
+    return (
+        <div className="w-full h-full bg-zinc-950/50 rounded-xl border border-zinc-800/50 overflow-hidden">
+            <ReactFlow
+                nodes={flowNodes}
+                edges={flowEdges}
+                nodeTypes={nodeTypes}
+                onNodeClick={(_, node) => onSelect(node.data.node)}
+                fitView
+                className="w-full h-full"
+                minZoom={0.1}
+                maxZoom={1.5}
+            >
+                <Background color="#27272a" gap={20} size={1} />
+                <Controls className="!bg-zinc-900 border !border-zinc-800 !fill-zinc-400" />
+            </ReactFlow>
+        </div>
+    );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────
 export function AwsArchitecture() {
     const { socket, connectionState } = useSocket();
@@ -155,7 +270,8 @@ export function AwsArchitecture() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
-    const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["networking", "compute", "storage", "load-balancing"]));
+    const [viewMode, setViewMode] = useState<"tree" | "graph">("tree");
+    const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["networking", "compute", "storage", "load-balancing", "database", "security"]));
     const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
     const [selectedNode, setSelectedNode] = useState<InfraNode | null>(null);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -246,6 +362,22 @@ export function AwsArchitecture() {
                         {isLive ? "Live Account — On-Demand Scan" : "Demo Simulation"}
                     </p>
                 </div>
+                <div className="flex flex-col items-end gap-2">
+                    <div className="flex bg-zinc-900/50 p-1 rounded-lg border border-zinc-800/50">
+                        <button
+                            onClick={() => setViewMode("tree")}
+                            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition", viewMode === "tree" ? "bg-zinc-800 text-zinc-200 shadow-sm" : "text-zinc-500 hover:text-zinc-300")}
+                        >
+                            <Boxes className="h-3 w-3" /> Outline
+                        </button>
+                        <button
+                            onClick={() => setViewMode("graph")}
+                            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition", viewMode === "graph" ? "bg-sky-500/20 text-sky-400 shadow-sm" : "text-zinc-500 hover:text-zinc-300")}
+                        >
+                            <GitMerge className="h-3 w-3" /> Visual Graph
+                        </button>
+                    </div>
+                </div>
                 <div className="flex items-center gap-3">
                     {isLive && (
                         <button
@@ -299,95 +431,101 @@ export function AwsArchitecture() {
             {/* Main Content Grid */}
             {data && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
-                    {/* Tree View (2 cols) */}
-                    <div className="lg:col-span-2 rounded-xl border border-zinc-800/50 bg-zinc-900/20 p-4 overflow-y-auto max-h-[70vh]">
-                        <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4 flex items-center gap-2">
-                            <Boxes className="h-3.5 w-3.5" /> Hierarchical Resource View
-                        </h3>
-                        {Object.entries(grouped).map(([category, types]) => (
-                            <div key={category} className="mb-3">
-                                <button
-                                    onClick={() => toggleCategory(category)}
-                                    className="flex items-center gap-2 w-full text-left py-2 px-2 rounded-lg hover:bg-zinc-800/30 transition"
-                                >
-                                    {expandedCategories.has(category)
-                                        ? <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
-                                        : <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
-                                    }
-                                    <span className="text-xs font-bold uppercase tracking-widest text-sky-400">{CATEGORY_LABEL[category] || category}</span>
-                                    <span className="text-[9px] text-zinc-600 ml-auto">
-                                        {Object.values(types).reduce((s, arr) => s + arr.length, 0)} resources
-                                    </span>
-                                </button>
+                    {/* View Area (2 cols) */}
+                    <div className="lg:col-span-2 relative">
+                        {viewMode === "tree" ? (
+                            <div className="h-full rounded-xl border border-zinc-800/50 bg-zinc-900/20 p-4 overflow-y-auto max-h-[70vh]">
+                                <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4 flex items-center gap-2">
+                                    <Boxes className="h-3.5 w-3.5" /> Hierarchical Resource View
+                                </h3>
+                                {Object.entries(grouped).map(([category, types]) => (
+                                    <div key={category} className="mb-3">
+                                        <button
+                                            onClick={() => toggleCategory(category)}
+                                            className="flex items-center gap-2 w-full text-left py-2 px-2 rounded-lg hover:bg-zinc-800/30 transition"
+                                        >
+                                            {expandedCategories.has(category)
+                                                ? <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+                                                : <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+                                            }
+                                            <span className="text-xs font-bold uppercase tracking-widest text-sky-400">{CATEGORY_LABEL[category] || category}</span>
+                                            <span className="text-[9px] text-zinc-600 ml-auto">
+                                                {Object.values(types).reduce((s, arr) => s + arr.length, 0)} resources
+                                            </span>
+                                        </button>
 
-                                {expandedCategories.has(category) && (
-                                    <div className="pl-4 border-l border-zinc-800/50 ml-2 mt-1 space-y-2">
-                                        {Object.entries(types).map(([type, resources]) => {
-                                            const TypeIcon = TYPE_ICON[type] || Boxes;
-                                            return (
-                                                <div key={type}>
-                                                    <button
-                                                        onClick={() => toggleType(type)}
-                                                        className="flex items-center gap-2 w-full text-left py-1.5 px-2 rounded hover:bg-zinc-800/20 transition"
-                                                    >
-                                                        {expandedTypes.has(type)
-                                                            ? <ChevronDown className="h-3 w-3 text-zinc-600" />
-                                                            : <ChevronRight className="h-3 w-3 text-zinc-600" />
-                                                        }
-                                                        <TypeIcon className="h-3.5 w-3.5 text-zinc-400" />
-                                                        <span className="text-[11px] font-semibold text-zinc-300">{TYPE_LABEL[type] || type}</span>
-                                                        <span className="text-[9px] text-zinc-600 ml-auto">{resources.length}</span>
-                                                    </button>
+                                        {expandedCategories.has(category) && (
+                                            <div className="pl-4 border-l border-zinc-800/50 ml-2 mt-1 space-y-2">
+                                                {Object.entries(types).map(([type, resources]) => {
+                                                    const TypeIcon = TYPE_ICON[type] || Boxes;
+                                                    return (
+                                                        <div key={type}>
+                                                            <button
+                                                                onClick={() => toggleType(type)}
+                                                                className="flex items-center gap-2 w-full text-left py-1.5 px-2 rounded hover:bg-zinc-800/20 transition"
+                                                            >
+                                                                {expandedTypes.has(type)
+                                                                    ? <ChevronDown className="h-3 w-3 text-zinc-600" />
+                                                                    : <ChevronRight className="h-3 w-3 text-zinc-600" />
+                                                                }
+                                                                <TypeIcon className="h-3.5 w-3.5 text-zinc-400" />
+                                                                <span className="text-[11px] font-semibold text-zinc-300">{TYPE_LABEL[type] || type}</span>
+                                                                <span className="text-[9px] text-zinc-600 ml-auto">{resources.length}</span>
+                                                            </button>
 
-                                                    {expandedTypes.has(type) && (
-                                                        <div className="pl-6 mt-1 space-y-1">
-                                                            {resources.map(node => (
-                                                                <button
-                                                                    key={node.id}
-                                                                    onClick={() => setSelectedNode(node)}
-                                                                    className={cn(
-                                                                        "flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg border transition text-xs",
-                                                                        selectedNode?.id === node.id
-                                                                            ? "border-sky-500/40 bg-sky-500/10"
-                                                                            : "border-zinc-800/30 bg-zinc-900/30 hover:bg-zinc-800/30"
-                                                                    )}
-                                                                >
-                                                                    <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", STATUS_CONFIG[node.status]?.color.replace("text-", "bg-"))} />
-                                                                    <span className="text-zinc-200 font-medium truncate flex-1">{node.name}</span>
-                                                                    <span className="text-[9px] text-zinc-600 shrink-0">{node.region}</span>
-                                                                    <StatusBadge status={node.status} />
-                                                                    {/* Inline action buttons for EC2 */}
-                                                                    {node.type === "ec2" && isLive && node.status === "active" && (
+                                                            {expandedTypes.has(type) && (
+                                                                <div className="pl-6 mt-1 space-y-1">
+                                                                    {resources.map(node => (
                                                                         <button
-                                                                            onClick={(e) => { e.stopPropagation(); handleAction("stop", node.id, node.instanceId || node.id, node.region); }}
-                                                                            disabled={actionLoading === node.id}
-                                                                            className="ml-1 p-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
-                                                                            title="Stop Instance"
+                                                                            key={node.id}
+                                                                            onClick={() => setSelectedNode(node)}
+                                                                            className={cn(
+                                                                                "flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg border transition text-xs",
+                                                                                selectedNode?.id === node.id
+                                                                                    ? "border-sky-500/40 bg-sky-500/10"
+                                                                                    : "border-zinc-800/30 bg-zinc-900/30 hover:bg-zinc-800/30"
+                                                                            )}
                                                                         >
-                                                                            {actionLoading === node.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Square className="h-2.5 w-2.5" />}
+                                                                            <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", STATUS_CONFIG[node.status]?.color.replace("text-", "bg-"))} />
+                                                                            <span className="text-zinc-200 font-medium truncate flex-1">{node.name}</span>
+                                                                            <span className="text-[9px] text-zinc-600 shrink-0">{node.region}</span>
+                                                                            <StatusBadge status={node.status} />
+                                                                            {/* Inline action buttons for EC2 */}
+                                                                            {node.type === "ec2" && isLive && node.status === "active" && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); handleAction("stop", node.id, node.instanceId || node.id, node.region); }}
+                                                                                    disabled={actionLoading === node.id}
+                                                                                    className="ml-1 p-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
+                                                                                    title="Stop Instance"
+                                                                                >
+                                                                                    {actionLoading === node.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Square className="h-2.5 w-2.5" />}
+                                                                                </button>
+                                                                            )}
+                                                                            {node.type === "ec2" && isLive && node.status === "stopped" && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); handleAction("start", node.id, node.instanceId || node.id, node.region); }}
+                                                                                    disabled={actionLoading === node.id}
+                                                                                    className="ml-1 p-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition"
+                                                                                    title="Start Instance"
+                                                                                >
+                                                                                    {actionLoading === node.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Play className="h-2.5 w-2.5" />}
+                                                                                </button>
+                                                                            )}
                                                                         </button>
-                                                                    )}
-                                                                    {node.type === "ec2" && isLive && node.status === "stopped" && (
-                                                                        <button
-                                                                            onClick={(e) => { e.stopPropagation(); handleAction("start", node.id, node.instanceId || node.id, node.region); }}
-                                                                            disabled={actionLoading === node.id}
-                                                                            className="ml-1 p-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition"
-                                                                            title="Start Instance"
-                                                                        >
-                                                                            {actionLoading === node.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Play className="h-2.5 w-2.5" />}
-                                                                        </button>
-                                                                    )}
-                                                                </button>
-                                                            ))}
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
-                                )}
+                                ))}
                             </div>
-                        ))}
+                        ) : (
+                            <ArchitectureGraph data={data} selectedNodeId={selectedNode?.id || null} onSelect={setSelectedNode} />
+                        )}
                     </div>
 
                     {/* Detail Panel (1 col) */}

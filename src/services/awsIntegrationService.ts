@@ -1,4 +1,9 @@
-import { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand, DescribeVolumesCommand, RunInstancesCommand, TerminateInstancesCommand, StartInstancesCommand, StopInstancesCommand } from "@aws-sdk/client-ec2";
+import {
+    EC2Client, DescribeInstancesCommand, DescribeRegionsCommand,
+    DescribeVolumesCommand, RunInstancesCommand, TerminateInstancesCommand,
+    StartInstancesCommand, StopInstancesCommand,
+    DeleteVolumeCommand, DeleteSecurityGroupCommand, ReleaseAddressCommand
+} from "@aws-sdk/client-ec2";
 import { GetCostAndUsageCommand, CostExplorerClient } from "@aws-sdk/client-cost-explorer";
 import { CloudWatchClient, GetMetricStatisticsCommand } from "@aws-sdk/client-cloudwatch";
 import { GuardDutyClient, ListDetectorsCommand, GetFindingsStatisticsCommand, ListFindingsCommand, GetFindingsCommand } from "@aws-sdk/client-guardduty";
@@ -69,6 +74,48 @@ export class AwsIntegrationService {
             return true;
         } catch (err: any) {
             throw new Error(`AWS credential validation failed: ${err.code || err.message}`);
+        }
+    }
+
+    /**
+     * Delete an unattached EBS Volume
+     */
+    async deleteEbsVolume(creds: PerRequestCredentials, region: string, volumeId: string): Promise<void> {
+        const resolved = resolveCredentials(creds);
+        if (!resolved) throw new Error("Credentials required for EBS deletion");
+        const client = new EC2Client({ region, credentials: resolved.credentials });
+        try {
+            await client.send(new DeleteVolumeCommand({ VolumeId: volumeId }));
+        } catch (err: any) {
+            throw new Error(`Failed to delete Volume ${volumeId}: ${err.message}`);
+        }
+    }
+
+    /**
+     * Delete an unused Security Group
+     */
+    async deleteSecurityGroup(creds: PerRequestCredentials, region: string, groupId: string): Promise<void> {
+        const resolved = resolveCredentials(creds);
+        if (!resolved) throw new Error("Credentials required for SG deletion");
+        const client = new EC2Client({ region, credentials: resolved.credentials });
+        try {
+            await client.send(new DeleteSecurityGroupCommand({ GroupId: groupId }));
+        } catch (err: any) {
+            throw new Error(`Failed to delete Security Group ${groupId}: ${err.message}`);
+        }
+    }
+
+    /**
+     * Release an unassociated Elastic IP
+     */
+    async releaseElasticIp(creds: PerRequestCredentials, region: string, allocationId: string): Promise<void> {
+        const resolved = resolveCredentials(creds);
+        if (!resolved) throw new Error("Credentials required for EIP release");
+        const client = new EC2Client({ region, credentials: resolved.credentials });
+        try {
+            await client.send(new ReleaseAddressCommand({ AllocationId: allocationId }));
+        } catch (err: any) {
+            throw new Error(`Failed to release EIP ${allocationId}: ${err.message}`);
         }
     }
 
