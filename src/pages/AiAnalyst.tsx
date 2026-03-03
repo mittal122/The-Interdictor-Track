@@ -32,7 +32,7 @@ const SEVERITY_STYLES = {
 
 export function AiAnalyst() {
     const { telemetry } = useSocket();
-    const { token } = useAuth();
+    const { token, logout } = useAuth();
     const [selectedType, setSelectedType] = useState<AnalysisType>("incident");
     const [customContext, setCustomContext] = useState("");
     const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -72,6 +72,10 @@ export function AiAnalyst() {
                 }),
             });
 
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             if (!res.ok) throw new Error(`API error: ${res.status}`);
             const data: AnalysisResult = await res.json();
             setResult(data);

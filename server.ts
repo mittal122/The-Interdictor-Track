@@ -14,6 +14,7 @@ import { AlertingWorker } from "./src/services/alertingWorker";
 import { runAnalysis } from "./src/services/nimAnalystService";
 import { AwsIntegrationService } from "./src/services/awsIntegrationService";
 import { PerRequestCredentials } from "./src/services/awsIntegrationService";
+import { getFullAccountInfrastructure } from "./src/services/awsInfrastructureEngine";
 import pool from "./src/services/db";
 
 dotenv.config();
@@ -99,7 +100,7 @@ async function startServer() {
       const match = await bcrypt.compare(password, user.password);
       if (!match) return res.status(401).json({ message: "Invalid credentials" });
 
-      const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "8h" });
+      const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
       return res.json({ token, user: { username: user.username, role: user.role } });
     } catch (err) {
       console.error("DB login error:", err);
@@ -195,6 +196,131 @@ async function startServer() {
         if (error) return callback({ status: "error", message: stderr || error.message });
         callback({ status: "success", message: stdout || "Command executed silently." });
       });
+    });
+
+    // ── AWS EC2 Active Management ─────────────────────────────────────────
+    socket.on("launch_ec2_node", async (data, callback) => {
+      if (socket.data.user.role !== "admin") {
+        return callback({ status: "error", message: "Unauthorized: Admin role required to create AWS instances." });
+      }
+      if (!userCreds) {
+        return callback({ status: "error", message: "Live Mode required. Connect with full AWS Credentials first." });
+      }
+
+      try {
+        await awsValidatorService.launchEc2Instance(userCreds, data.region || "us-east-1");
+        callback({ status: "success", message: `Successfully requested new EC2 instance in ${data.region}` });
+
+        // Force an immediate telemetry refresh to show the new 'pending' node
+        const freshData = await telemetryService.getAggregatedTelemetry(userCreds);
+        socket.emit("telemetry_update", freshData);
+      } catch (err: any) {
+        console.error("EC2 Launch Error:", err);
+        callback({ status: "error", message: `Launch Failed: ${err.message}` });
+      }
+    });
+
+    socket.on("terminate_ec2_node", async (data, callback) => {
+      if (socket.data.user.role !== "admin") {
+        return callback({ status: "error", message: "Unauthorized: Admin role required to terminate AWS instances." });
+      }
+      if (!userCreds) {
+        return callback({ status: "error", message: "Live Mode required. Connect with full AWS Credentials first." });
+      }
+      if (!data.instanceId || !data.region) {
+        return callback({ status: "error", message: "Region and InstanceId required." });
+      }
+
+      try {
+        await awsValidatorService.terminateEc2Instance(userCreds, data.region, data.instanceId);
+        callback({ status: "success", message: `Termination signal sent for ${data.instanceId}` });
+
+        // Force an immediate telemetry refresh to show the node moving to 'shutting-down'
+        const freshData = await telemetryService.getAggregatedTelemetry(userCreds);
+        socket.emit("telemetry_update", freshData);
+      } catch (err: any) {
+        console.error("EC2 Terminate Error:", err);
+        callback({ status: "error", message: `Termination Failed: ${err.message}` });
+      }
+    });
+
+    // ── On-Demand Paid AWS APIs ─────────────────────────────────────────
+    socket.on("fetch_billing_data", async (callback) => {
+      if (!userCreds) return callback({ status: "error", message: "Live Mode required." });
+      try {
+        const cost = await telemetryService.fetchBillingData(userCreds);
+        callback({ status: "success", data: cost });
+      } catch (err: any) {
+        console.error("Billing Fetch Error:", err);
+        callback({ status: "error", message: err.message });
+      }
+    });
+
+    socket.on("fetch_cpu_data", async (callback) => {
+      if (!userCreds) return callback({ status: "error", message: "Live Mode required." });
+      try {
+        const compute = await telemetryService.fetchComputeMetrics(userCreds);
+        callback({ status: "success", data: compute.cpu });
+      } catch (err: any) {
+        console.error("CPU Fetch Error:", err);
+        callback({ status: "error", message: err.message });
+      }
+    });
+
+    // ── EC2 Stop / Start ──────────────────────────────────────────────────
+    socket.on("stop_ec2_node", async (data, callback) => {
+      if (socket.data.user.role !== "admin") {
+        return callback({ status: "error", message: "Unauthorized: Admin role required." });
+      }
+      if (!userCreds) {
+        return callback({ status: "error", message: "Live Mode required." });
+      }
+      if (!data.instanceId || !data.region) {
+        return callback({ status: "error", message: "Region and InstanceId required." });
+      }
+      try {
+        await awsValidatorService.stopEc2Instance(userCreds, data.region, data.instanceId);
+        callback({ status: "success", message: `Stop signal sent for ${data.instanceId}` });
+        const freshData = await telemetryService.getAggregatedTelemetry(userCreds);
+        socket.emit("telemetry_update", freshData);
+      } catch (err: any) {
+        console.error("EC2 Stop Error:", err);
+        callback({ status: "error", message: `Stop Failed: ${err.message}` });
+      }
+    });
+
+    socket.on("start_ec2_node", async (data, callback) => {
+      if (socket.data.user.role !== "admin") {
+        return callback({ status: "error", message: "Unauthorized: Admin role required." });
+      }
+      if (!userCreds) {
+        return callback({ status: "error", message: "Live Mode required." });
+      }
+      if (!data.instanceId || !data.region) {
+        return callback({ status: "error", message: "Region and InstanceId required." });
+      }
+      try {
+        await awsValidatorService.startEc2Instance(userCreds, data.region, data.instanceId);
+        callback({ status: "success", message: `Start signal sent for ${data.instanceId}` });
+        const freshData = await telemetryService.getAggregatedTelemetry(userCreds);
+        socket.emit("telemetry_update", freshData);
+      } catch (err: any) {
+        console.error("EC2 Start Error:", err);
+        callback({ status: "error", message: `Start Failed: ${err.message}` });
+      }
+    });
+    // ── Full Account Infrastructure Map ────────────────────────────────────
+    socket.on("fetch_full_account_map", async (callback) => {
+      if (!userCreds) return callback({ status: "error", message: "Live Mode required." });
+      try {
+        console.log("[INFRA] Full account scan requested...");
+        const infraMap = await getFullAccountInfrastructure(userCreds);
+        if (!infraMap) return callback({ status: "error", message: "Failed to scan infrastructure." });
+        callback({ status: "success", data: infraMap });
+      } catch (err: any) {
+        console.error("Infrastructure Scan Error:", err);
+        callback({ status: "error", message: err.message });
+      }
     });
 
     socket.on("disconnect", () => {

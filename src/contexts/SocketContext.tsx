@@ -4,9 +4,12 @@ import { useAuth } from './AuthContext';
 import { useAppMode } from './AppModeContext';
 import { useCredentials } from './CredentialsContext';
 
+export type ConnectionState = 'demo' | 'connecting' | 'live';
+
 interface SocketContextType {
   socket: Socket | null;
   telemetry: any | null;
+  connectionState: ConnectionState;
 }
 
 const SocketContext = createContext<SocketContextType | null>(null);
@@ -44,7 +47,8 @@ function generateDemoTelemetry() {
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [telemetry, setTelemetry] = useState<any | null>(null);
-  const { token } = useAuth();
+  const [connectionState, setConnectionState] = useState<ConnectionState>('demo');
+  const { token, logout } = useAuth();
   const { mode } = useAppMode();
   const { credentials } = useCredentials();
   const demoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -55,6 +59,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       // Disconnect live socket if we're switching back to demo
       if (socket) { socket.disconnect(); setSocket(null); }
 
+      setConnectionState('demo');
       setTelemetry(generateDemoTelemetry());
       demoIntervalRef.current = setInterval(() => setTelemetry(generateDemoTelemetry()), 2000);
       return () => { if (demoIntervalRef.current) clearInterval(demoIntervalRef.current); };
@@ -73,6 +78,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     // Connect the WebSocket with JWT + cloud credentials in the auth payload.
     // The backend stores cloudCredentials per-socket and uses them to fetch
     // real AWS EC2 + billing data, then emits personalized telemetry to this socket only.
+    setConnectionState('connecting');
     const newSocket = io(window.location.origin, {
       auth: {
         token,
@@ -96,11 +102,19 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     newSocket.on('connect_error', (err) => {
       console.error('[LIVE] WebSocket connection failed:', err.message);
+      if (
+        err.message.includes('Authentication error') ||
+        err.message.includes('jwt expired') ||
+        err.message.includes('Invalid token')
+      ) {
+        logout();
+      }
       // If connection fails (e.g. backend down), fall back to demo generation
       setTelemetry(generateDemoTelemetry());
     });
 
     newSocket.on('telemetry_update', (data) => {
+      setConnectionState('live');
       setTelemetry(data);
     });
 
@@ -110,7 +124,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   }, [token, mode, credentials]); // re-connect when credentials change
 
   return (
-    <SocketContext.Provider value={{ socket, telemetry }}>
+    <SocketContext.Provider value={{ socket, telemetry, connectionState }}>
       {children}
     </SocketContext.Provider>
   );

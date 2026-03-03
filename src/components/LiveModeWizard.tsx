@@ -19,7 +19,7 @@ const AWS_REGIONS = [
 export function LiveModeWizard() {
     const { mode, setMode } = useAppMode();
     const { credentials, setCredentials } = useCredentials();
-    const { token } = useAuth();
+    const { token, logout } = useAuth();
 
     const [step, setStep] = useState<Step>('provider');
     const [showSecret, setShowSecret] = useState(false);
@@ -27,6 +27,7 @@ export function LiveModeWizard() {
         awsAccessKeyId: '',
         awsSecretKey: '',
         awsRegion: 'us-east-1',
+        rememberMe: false,
     });
     const [validationError, setValidationError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
@@ -38,7 +39,7 @@ export function LiveModeWizard() {
     const handleCancel = () => {
         setMode('demo');
         setStep('provider');
-        setForm({ awsAccessKeyId: '', awsSecretKey: '', awsRegion: 'us-east-1' });
+        setForm({ awsAccessKeyId: '', awsSecretKey: '', awsRegion: 'us-east-1', rememberMe: false });
         setValidationError(null);
     };
 
@@ -68,12 +69,20 @@ export function LiveModeWizard() {
             });
 
             if (!res.ok) {
+                if (res.status === 401) {
+                    logout();
+                    return;
+                }
                 const body = await res.json().catch(() => ({}));
                 throw new Error(body.message || 'Credential validation failed. Check your keys and try again.');
             }
 
-            // Success: persist in transient context only
-            setCredentials(form as CloudCredentials);
+            // Success: persist based on rememberMe flag
+            setCredentials({
+                awsAccessKeyId: form.awsAccessKeyId,
+                awsSecretKey: form.awsSecretKey,
+                awsRegion: form.awsRegion
+            }, form.rememberMe);
             // Reset wizard state for next time
             setStep('provider');
         } catch (err: any) {
@@ -146,7 +155,7 @@ export function LiveModeWizard() {
                         {step === 'provider' && (
                             <div className="space-y-4">
                                 <p className="text-xs text-zinc-400 leading-relaxed">
-                                    Select your cloud provider. Your credentials will be held <span className="text-emerald-400 font-semibold">exclusively in memory</span> for this session and never written to disk.
+                                    Select your cloud provider to begin securely authenticating your session.
                                 </p>
                                 <div className="grid grid-cols-3 gap-3 mt-4">
                                     {/* AWS - Active */}
@@ -166,10 +175,6 @@ export function LiveModeWizard() {
                                             <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Soon</span>
                                         </div>
                                     ))}
-                                </div>
-                                <div className="flex items-center gap-2 mt-4 p-3 rounded-lg bg-yellow-950/30 border border-yellow-800/30">
-                                    <Lock className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
-                                    <p className="text-[10px] text-yellow-500/80 leading-relaxed">Credentials are never stored in <code className="font-mono">localStorage</code>, cookies, or any persistent browser storage.</p>
                                 </div>
                             </div>
                         )}
@@ -216,19 +221,20 @@ export function LiveModeWizard() {
                                     </div>
                                 </div>
 
-                                {/* Region */}
-                                <div>
-                                    <label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1.5">Default Region</label>
-                                    <select
-                                        value={form.awsRegion}
-                                        onChange={e => setForm(f => ({ ...f, awsRegion: e.target.value }))}
-                                        className="w-full rounded-lg border border-zinc-700/60 bg-zinc-900 px-3 py-2.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-emerald-600/60 transition-colors cursor-pointer"
-                                    >
-                                        {AWS_REGIONS.map(r => (
-                                            <option key={r} value={r} className="bg-zinc-900">{r}</option>
-                                        ))}
-                                    </select>
-                                </div>
+                                {/* Remember Me */}
+                                <label className="flex items-center gap-2 cursor-pointer group mt-2 w-fit">
+                                    <div className="relative flex items-center justify-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={form.rememberMe}
+                                            onChange={e => setForm(f => ({ ...f, rememberMe: e.target.checked }))}
+                                            className="peer sr-only"
+                                        />
+                                        <div className="h-4 w-4 rounded border border-zinc-700 bg-zinc-900 transition-all peer-checked:bg-emerald-600 peer-checked:border-emerald-500 group-hover:border-zinc-500"></div>
+                                        <CheckCircle2 className="absolute h-3 w-3 text-white opacity-0 transition-opacity peer-checked:opacity-100" />
+                                    </div>
+                                    <span className="text-[11px] text-zinc-400 group-hover:text-zinc-300 select-none">Remember these credentials (saves securely to browser)</span>
+                                </label>
 
                                 {/* Error */}
                                 {validationError && (

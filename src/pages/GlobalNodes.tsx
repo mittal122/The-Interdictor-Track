@@ -3,6 +3,7 @@ import { Globe, Activity, Network, AlertTriangle, Signal, Wifi, FlaskConical } f
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
+import { ConfirmActionModal } from "../components/modals/ConfirmActionModal";
 
 // --- Types ---
 interface GridRegion {
@@ -101,10 +102,12 @@ function healthTextColor(health: number): string {
 }
 
 export function GlobalNodes() {
-    const { telemetry } = useSocket();
-    const { mode } = useAppMode();
+    const { telemetry, socket } = useSocket();
+    const { mode, selectedRegion } = useAppMode();
     const [demoRegions, setDemoRegions] = useState<GridRegion[]>(() => generateDemoRegions());
     const [selected, setSelected] = useState<GridRegion | null>(null);
+    const [actionModal, setActionModal] = useState<{ isOpen: boolean, type: "LAUNCH" | "TERMINATE", instanceId?: string }>({ isOpen: false, type: "LAUNCH" });
+    const [isExecuting, setIsExecuting] = useState(false);
 
     // Only run the demo interval in demo mode
     useEffect(() => {
@@ -121,7 +124,11 @@ export function GlobalNodes() {
         ? buildLiveRegions(telemetry.computeNodes)
         : demoRegions;
 
-    const regions = isLive ? allRegions.filter(r => r.nodeCount > 0) : allRegions;
+    let regions = isLive ? allRegions.filter(r => r.nodeCount > 0) : allRegions;
+    if (isLive && selectedRegion !== 'global') {
+        regions = regions.filter(r => r.code === selectedRegion);
+    }
+    const liveNodesCount = regions.reduce((s, r) => s + r.nodeCount, 0);
 
     const stats = useMemo(() => ({
         totalNodes: regions.reduce((s, r) => s + r.nodeCount, 0),
@@ -130,20 +137,48 @@ export function GlobalNodes() {
         activeRegions: regions.filter(r => r.health > 0).length,
     }), [regions]);
 
+    const handleConfirmAction = () => {
+        if (!isLive) {
+            alert("Action disabled in Demo Mode. Connect AWS Credentials first.");
+            setActionModal({ isOpen: false, type: "LAUNCH" });
+            return;
+        }
+
+        setIsExecuting(true);
+        if (actionModal.type === "LAUNCH") {
+            const regionToLaunchIn = selected?.code || (selectedRegion === "global" ? "us-east-1" : selectedRegion);
+            socket?.emit("launch_ec2_node", { region: regionToLaunchIn }, (res: any) => {
+                setIsExecuting(false);
+                setActionModal({ isOpen: false, type: "LAUNCH" });
+                alert(res.message);
+            });
+        }
+    };
+
     return (
         <div className="flex h-full flex-col gap-6 overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-zinc-800/50 pb-4">
-                <div>
-                    <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Global Nodes</h2>
-                    <p className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Geographic Grid Health Map</p>
+                <div className="flex items-center gap-4">
+                    <div>
+                        <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Global Nodes</h2>
+                        <p className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Geographic Grid Health Map</p>
+                    </div>
+                    {isLive && (
+                        <button
+                            onClick={() => setActionModal({ isOpen: true, type: "LAUNCH" })}
+                            className="ml-4 rounded bg-emerald-600/20 border border-emerald-500/50 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-400 hover:bg-emerald-600/30 transition-colors"
+                        >
+                            Launch Instance +
+                        </button>
+                    )}
                 </div>
                 <div className="flex items-center gap-2">
                     {isLive ? (
                         <>
                             <Wifi className="h-4 w-4 text-emerald-400 animate-pulse" />
                             <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">
-                                Live · {telemetry.computeNodes.length} EC2 Nodes
+                                Live · {liveNodesCount} EC2 Nodes
                             </span>
                         </>
                     ) : (
@@ -249,6 +284,16 @@ export function GlobalNodes() {
                     )}
                 </div>
             </div>
+
+            <ConfirmActionModal
+                isOpen={actionModal.isOpen}
+                onClose={() => setActionModal({ isOpen: false, type: actionModal.type })}
+                onConfirm={handleConfirmAction}
+                actionType={actionModal.type}
+                instanceInfo={actionModal.instanceId}
+                regionInfo={selected?.code || (selectedRegion === "global" ? "us-east-1" : selectedRegion)}
+                isExecuting={isExecuting}
+            />
         </div>
     );
 }

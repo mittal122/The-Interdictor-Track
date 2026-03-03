@@ -3,6 +3,7 @@ import { Activity, Cpu, Zap, AlertTriangle, Server, Thermometer, Wifi, FlaskConi
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
+import { ConfirmActionModal } from "../components/modals/ConfirmActionModal";
 
 // --- Types ---
 interface ServerUnit {
@@ -62,10 +63,12 @@ const statusGlow: Record<string, string> = {
 };
 
 export function ComputeClusters() {
-    const { telemetry } = useSocket();
-    const { mode } = useAppMode();
+    const { telemetry, socket } = useSocket();
+    const { mode, selectedRegion } = useAppMode();
     const [localServers, setLocalServers] = useState<ServerUnit[]>(() => generateServers());
     const [selected, setSelected] = useState<ServerUnit | null>(null);
+    const [actionModal, setActionModal] = useState<{ isOpen: boolean, type: "LAUNCH" | "TERMINATE", instanceId?: string }>({ isOpen: false, type: "LAUNCH" });
+    const [isExecuting, setIsExecuting] = useState(false);
 
     const isLive = mode === 'live' && telemetry?.computeNodes && telemetry.computeNodes.length > 0;
 
@@ -76,20 +79,22 @@ export function ComputeClusters() {
     }, [isLive]);
 
     const servers: ServerUnit[] = isLive
-        ? telemetry.computeNodes.map((n: any, i: number) => ({
-            id: n.id,
-            hostname: `${n.type} (${n.region})`,
-            ip: n.instanceId || "cloud-managed",
-            rack: n.rack || "AWS-CLOUD",
-            slot: i + 1,
-            status: n.status === 'running' || n.status === 'online' ? 'online' : 'offline',
-            cpu: n.cpu || 0,
-            ram: n.memory || 0,
-            disk: n.disk || 25,
-            pue: 1.12,
-            uptime: n.uptime || "0h",
-            temp: (n.status === 'running' || n.status === 'online') ? 45 : 0
-        }))
+        ? telemetry.computeNodes
+            .filter((n: any) => selectedRegion === 'global' || n.region === selectedRegion)
+            .map((n: any, i: number) => ({
+                id: n.id,
+                hostname: `${n.type} (${n.region})`,
+                ip: n.instanceId || "cloud-managed",
+                rack: n.rack || "AWS-CLOUD",
+                slot: i + 1,
+                status: n.status === 'running' || n.status === 'online' ? 'online' : 'offline',
+                cpu: n.cpu || 0,
+                ram: n.memory || 0,
+                disk: n.disk || 25,
+                pue: 1.12,
+                uptime: n.uptime || "0h",
+                temp: (n.status === 'running' || n.status === 'online') ? 45 : 0
+            }))
         : localServers;
 
     const stats = useMemo(() => {
@@ -103,20 +108,53 @@ export function ComputeClusters() {
 
     const racks = Array.from(new Set(servers.map(s => s.rack)));
 
+    const handleConfirmAction = () => {
+        if (!isLive) {
+            alert("Action disabled in Demo Mode. Connect AWS Credentials first.");
+            setActionModal({ isOpen: false, type: "LAUNCH" });
+            return;
+        }
+
+        setIsExecuting(true);
+        if (actionModal.type === "LAUNCH") {
+            socket?.emit("launch_ec2_node", { region: selectedRegion === "global" ? "us-east-1" : selectedRegion }, (res: any) => {
+                setIsExecuting(false);
+                setActionModal({ isOpen: false, type: "LAUNCH" });
+                alert(res.message);
+            });
+        } else {
+            socket?.emit("terminate_ec2_node", { instanceId: actionModal.instanceId, region: selectedRegion === "global" ? "us-east-1" : selectedRegion }, (res: any) => {
+                setIsExecuting(false);
+                setActionModal({ isOpen: false, type: "TERMINATE" });
+                alert(res.message);
+            });
+        }
+    };
+
     return (
         <div className="flex h-full flex-col gap-6 overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-zinc-800/50 pb-4">
-                <div>
-                    <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Compute Clusters</h2>
-                    <p className="text-xs text-zinc-500 uppercase tracking-wider mt-1">3D Data Center Rack Visualization</p>
+                <div className="flex items-center gap-4">
+                    <div>
+                        <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Compute Clusters</h2>
+                        <p className="text-xs text-zinc-500 uppercase tracking-wider mt-1">3D Data Center Rack Visualization</p>
+                    </div>
+                    {isLive && (
+                        <button
+                            onClick={() => setActionModal({ isOpen: true, type: "LAUNCH" })}
+                            className="ml-4 rounded bg-emerald-600/20 border border-emerald-500/50 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-400 hover:bg-emerald-600/30 transition-colors"
+                        >
+                            Launch Instance +
+                        </button>
+                    )}
                 </div>
                 <div className="flex items-center gap-2">
                     {isLive ? (
                         <>
                             <Wifi className="h-4 w-4 text-emerald-400 animate-pulse" />
                             <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">
-                                Live · {telemetry.computeNodes.length} AWS EC2
+                                Live · {servers.length} AWS EC2
                             </span>
                         </>
                     ) : (
@@ -214,6 +252,14 @@ export function ComputeClusters() {
                                 <UsageBar label="RAM" value={selected.ram} />
                                 <UsageBar label="Disk" value={selected.disk} />
                             </div>
+                            {isLive && selected.id.startsWith("i-") && (
+                                <button
+                                    onClick={() => setActionModal({ isOpen: true, type: "TERMINATE", instanceId: selected.id })}
+                                    className="mt-6 w-full rounded bg-red-600/20 border border-red-900/50 py-2 text-xs font-semibold uppercase tracking-widest text-red-500 hover:bg-red-600/30 transition-colors"
+                                >
+                                    Terminate Instance
+                                </button>
+                            )}
                         </div>
                     ) : (
                         <div className="flex flex-col items-center justify-center h-48 text-zinc-600">
@@ -223,6 +269,16 @@ export function ComputeClusters() {
                     )}
                 </div>
             </div>
+
+            <ConfirmActionModal
+                isOpen={actionModal.isOpen}
+                onClose={() => setActionModal({ isOpen: false, type: actionModal.type })}
+                onConfirm={handleConfirmAction}
+                actionType={actionModal.type}
+                instanceInfo={actionModal.instanceId}
+                regionInfo={selectedRegion === "global" ? "us-east-1" : selectedRegion}
+                isExecuting={isExecuting}
+            />
         </div>
     );
 }

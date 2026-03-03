@@ -1,7 +1,8 @@
-import { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand, DescribeVolumesCommand } from "@aws-sdk/client-ec2";
+import { EC2Client, DescribeInstancesCommand, DescribeRegionsCommand, DescribeVolumesCommand, RunInstancesCommand, TerminateInstancesCommand, StartInstancesCommand, StopInstancesCommand } from "@aws-sdk/client-ec2";
 import { GetCostAndUsageCommand, CostExplorerClient } from "@aws-sdk/client-cost-explorer";
 import { CloudWatchClient, GetMetricStatisticsCommand } from "@aws-sdk/client-cloudwatch";
-import { GuardDutyClient, ListDetectorsCommand, GetFindingsStatisticsCommand } from "@aws-sdk/client-guardduty";
+import { GuardDutyClient, ListDetectorsCommand, GetFindingsStatisticsCommand, ListFindingsCommand, GetFindingsCommand } from "@aws-sdk/client-guardduty";
+import { CloudTrailClient, LookupEventsCommand } from "@aws-sdk/client-cloudtrail";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -48,6 +49,7 @@ export class AwsIntegrationService {
     private nodesCache = new Map<string, { data: any[], timestamp: number }>();
     private volumesCache = new Map<string, { data: any[], timestamp: number }>();
     private CACHE_TTL_MS = 15000; // 15 seconds for expensive global fetches
+    private billingCache: { cost: number; timestamp: number; key: string } | null = null;
 
     /**
      * Validates credentials by doing a lightweight DescribeRegions call.
@@ -90,10 +92,15 @@ export class AwsIntegrationService {
                 region: resolved.region,
                 credentials: resolved.credentials,
             });
-            const regionResponse = await initialClient.send(new DescribeRegionsCommand({ AllRegions: false }));
-            const regionsToCheck = (regionResponse.Regions || [])
-                .map(r => r.RegionName)
-                .filter((r): r is string => !!r);
+            let regionsToCheck: string[] = [];
+            try {
+                const regionResponse = await initialClient.send(new DescribeRegionsCommand({ AllRegions: false }));
+                regionsToCheck = (regionResponse.Regions || [])
+                    .map(r => r.RegionName)
+                    .filter((r): r is string => !!r);
+            } catch (regionErr: any) {
+                console.warn("[AWS] Could not fetch regions globally (IAM restrictive). Falling back to default region.", regionErr.message);
+            }
 
             if (regionsToCheck.length === 0) {
                 // Fallback to just the main region if DescribeRegions fails but doesn't throw
@@ -165,10 +172,15 @@ export class AwsIntegrationService {
                 region: resolved.region,
                 credentials: resolved.credentials,
             });
-            const regionResponse = await initialClient.send(new DescribeRegionsCommand({ AllRegions: false }));
-            const regionsToCheck = (regionResponse.Regions || [])
-                .map(r => r.RegionName)
-                .filter((r): r is string => !!r);
+            let regionsToCheck: string[] = [];
+            try {
+                const regionResponse = await initialClient.send(new DescribeRegionsCommand({ AllRegions: false }));
+                regionsToCheck = (regionResponse.Regions || [])
+                    .map(r => r.RegionName)
+                    .filter((r): r is string => !!r);
+            } catch (regionErr: any) {
+                console.warn("[AWS] Could not fetch regions globally (IAM restrictive). Falling back to default region.", regionErr.message);
+            }
 
             if (regionsToCheck.length === 0) {
                 regionsToCheck.push(resolved.region);
@@ -190,15 +202,18 @@ export class AwsIntegrationService {
                             id: vol.VolumeId,
                             name: nameTag,
                             capacity: vol.Size || 0, // GB
-                            status: vol.State, // 'creating' | 'available' | 'in-use' | 'deleting' | 'deleted' | 'error'
-                            type: vol.VolumeType, // 'gp2', 'gp3', 'io1', 'io2', 'st1', 'sc1', 'standard'
+                            status: vol.State,
+                            type: vol.VolumeType,
                             region: regionName,
                             iops: vol.Iops || 0,
                             throughput: vol.Throughput || 0,
                         });
                     });
+                    if (response.Volumes && response.Volumes.length > 0) {
+                        console.log(`[AWS] Found ${response.Volumes.length} volumes in ${regionName}`);
+                    }
                 } catch (regionalErr) {
-                    // Ignore regional auth/access errors to let others succeed
+                    console.error(`[AWS] Error fetching volumes in ${regionName}:`, regionalErr);
                 }
             });
 
@@ -290,26 +305,64 @@ export class AwsIntegrationService {
 
             if (!detectorId) return 0; // GuardDuty is not enabled
 
-            // Get active findings count
-            const stats = await client.send(new GetFindingsStatisticsCommand({
+            // Fetch up to 20 active finding IDs
+            const listRes = await client.send(new ListFindingsCommand({
                 DetectorId: detectorId,
-                FindingStatisticTypes: ["COUNT_BY_SEVERITY"],
                 FindingCriteria: {
                     Criterion: {
-                        "severity": { Gte: 1 } // All severities
-                        // Usually you might filter by 'RECORD_STATE': { Eq: ['ACTIVE'] } but keeping it simple
+                        "severity": { Gte: 1 }
                     }
-                }
+                },
+                MaxResults: 20
             }));
 
-            // Sum up finding counts across all severities
-            let totalFindings = 0;
-            if (stats.FindingStatistics?.CountBySeverity) {
-                for (const count of Object.values(stats.FindingStatistics.CountBySeverity)) {
-                    totalFindings += count;
-                }
+            if (!listRes.FindingIds || listRes.FindingIds.length === 0) {
+                return [];
             }
-            return totalFindings;
+
+            // Get the rich details for those findings
+            const detailsRes = await client.send(new GetFindingsCommand({
+                DetectorId: detectorId,
+                FindingIds: listRes.FindingIds
+            }));
+
+            const mapSeverity = (sev: number) => {
+                if (sev >= 7.0) return "CRITICAL";
+                if (sev >= 4.0) return "HIGH";
+                if (sev >= 2.0) return "MEDIUM";
+                return "LOW";
+            };
+
+            const anomalies = (detailsRes.Findings || []).map(finding => {
+                // Try to extract real geolocation if it was a network event
+                const geo = finding.Service?.Action?.NetworkConnectionAction?.RemoteIpDetails?.GeoLocation;
+
+                // If real geo isn't present, we hallucinate a location deterministic to the Finding ID so it stays stable on the map
+                let lat = geo?.Lat || 0;
+                let lng = geo?.Lon || 0;
+
+                if (!geo || (lat === 0 && lng === 0)) {
+                    // Simple deterministic hash
+                    let hash = 0;
+                    for (let i = 0; i < (finding.Id?.length || 0); i++) {
+                        hash = ((hash << 5) - hash) + (finding.Id?.charCodeAt(i) || 0);
+                        hash |= 0;
+                    }
+                    // Generate lat between -60 and 60, lng between -150 and 150
+                    lat = (Math.abs(hash) % 120) - 60;
+                    lng = (Math.abs(hash * 3) % 300) - 150;
+                }
+
+                return {
+                    id: finding.Id?.substring(0, 10) || "UNKNOWN",
+                    lat,
+                    lng,
+                    severity: mapSeverity(finding.Severity || 1),
+                    title: finding.Title
+                };
+            });
+
+            return anomalies;
         } catch (error) {
             // If they don't have GuardDuty enabled or lack permissions, just fail silently and return 0
             console.error("AWS GuardDuty Error:", error);
@@ -323,6 +376,15 @@ export class AwsIntegrationService {
     async getBillingData(perRequest?: PerRequestCredentials | null) {
         const resolved = resolveCredentials(perRequest);
         if (!resolved) return null;
+
+        const cacheKey = resolved.credentials.accessKeyId;
+        const now = Date.now();
+
+        // AWS Cost Explorer charges $0.01 per query and only updates daily. 
+        // Cache this for 6 hours (21600000 ms) to prevent high billing.
+        if (this.billingCache && this.billingCache.key === cacheKey && (now - this.billingCache.timestamp < 21600000)) {
+            return this.billingCache.cost;
+        }
 
         // Cost Explorer is only available in us-east-1
         const ceClient = new CostExplorerClient({
@@ -342,12 +404,110 @@ export class AwsIntegrationService {
                 Granularity: "MONTHLY",
                 Metrics: ["UnblendedCost"]
             }));
-
-            const cost = res.ResultsByTime?.[0]?.Total?.UnblendedCost?.Amount || "0";
-            return parseFloat(cost);
+            const costString = res.ResultsByTime?.[0]?.Total?.UnblendedCost?.Amount || "0";
+            const costParam = parseFloat(costString) || 0;
+            this.billingCache = { cost: costParam, timestamp: now, key: cacheKey };
+            return costParam;
         } catch (error) {
             console.error("AWS Cost Explorer Error:", error);
             return null;
+        }
+    }
+
+    /**
+     * Fetches recent CloudTrail events for the Access Logs dashboard.
+     */
+    async getCloudTrailEvents(perRequest?: PerRequestCredentials | null) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) return null;
+
+        const client = new CloudTrailClient({
+            region: resolved.region,
+            credentials: resolved.credentials,
+        });
+
+        try {
+            // Using LookupEvents to get recent management/data events
+            const res = await client.send(new LookupEventsCommand({
+                MaxResults: 50,
+            }));
+
+            if (!res.Events) return [];
+
+            // Filter out the repetitive polling actions made by the application itself
+            const ignoredActions = [
+                "LookupEvents", "DescribeRegions", "ListDetectors",
+                "DescribeVolumes", "GetCostAndUsage", "DescribeInstances"
+            ];
+
+            const meaningfulEvents = res.Events.filter(event => {
+                if (event.EventName && ignoredActions.includes(event.EventName)) return false;
+                return true;
+            });
+
+            return meaningfulEvents.map(event => {
+                let status: "SUCCESS" | "FAILURE" | "BLOCKED" = "SUCCESS";
+                let severity: "INFO" | "WARN" | "ERROR" | "CRITICAL" = "INFO";
+
+                // CloudTrail doesn't always have explicit "denied", usually encoded in ErrorCode
+                let cloudTrailEvent = null;
+                try {
+                    if (event.CloudTrailEvent) {
+                        cloudTrailEvent = JSON.parse(event.CloudTrailEvent);
+                    }
+                } catch (e) { }
+
+                if (cloudTrailEvent?.errorCode || cloudTrailEvent?.errorMessage) {
+                    status = "FAILURE";
+                    severity = "ERROR";
+                    if (cloudTrailEvent.errorCode === "AccessDenied") {
+                        status = "BLOCKED";
+                        severity = "CRITICAL";
+                    }
+                }
+
+                // Try to categorize eventType
+                let eventType: "AUTH" | "SYSTEM" | "NETWORK" | "SECURITY" = "SYSTEM";
+                if (event.EventName?.includes("Login") || event.EventName?.includes("AssumeRole") || event.EventName?.includes("Token")) eventType = "AUTH";
+                if (event.EventName?.includes("SecurityGroup") || event.EventName?.includes("NetworkAcl") || event.EventName?.includes("Vpc")) eventType = "NETWORK";
+                if (event.EventName?.includes("Policy") || event.EventName?.includes("Delete") || event.EventName?.includes("Iam")) eventType = "SECURITY";
+
+                const resources = event.Resources?.map(r => r.ResourceName).join(", ") || "";
+
+                // Convert CloudTrail UTC EventTime to Local Time
+                const d = event.EventTime || new Date();
+                const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+
+                return {
+                    id: event.EventId || `CT-${Date.now()}-${Math.random()}`,
+                    timestamp: localDate.toISOString().replace("T", " ").split(".")[0],
+                    eventType,
+                    severity,
+                    sourceIp: cloudTrailEvent?.sourceIPAddress || "AWS Internal",
+                    user: event.Username || cloudTrailEvent?.userIdentity?.arn?.split("/").pop() || "AWS",
+                    action: event.EventName || "UnknownAction",
+                    status,
+                    details: `${event.EventSource || "AWS"} - ${resources}`.substring(0, 100),
+                    rawJson: cloudTrailEvent ? JSON.stringify(cloudTrailEvent, null, 2) : JSON.stringify(event, null, 2),
+                };
+            });
+        } catch (error: any) {
+            console.error("AWS CloudTrail Error:", error);
+            if (error.name === "AccessDeniedException" || error.message?.includes("AccessDenied") || error.$metadata?.httpStatusCode === 403) {
+                return [{
+                    id: `ERR-${Date.now()}`,
+                    timestamp: new Date().toISOString().replace("T", " ").split(".")[0],
+                    eventType: "SECURITY",
+                    severity: "CRITICAL",
+                    sourceIp: "AWS IAM",
+                    user: "System",
+                    action: "CloudTrail_LookupEvents",
+                    status: "BLOCKED",
+                    details: "Access Denied. Please attach the 'AWSCloudTrail_ReadOnlyAccess' permissions policy to your IAM user in the AWS Console.",
+                    rawJson: JSON.stringify({ message: "Access Denied", code: "AccessDenied", mitigation: "Attach AWSCloudTrail_ReadOnlyAccess" }, null, 2),
+                }];
+            }
+            return null; // Fallback to simulated data for other errors
         }
     }
 
@@ -355,5 +515,85 @@ export class AwsIntegrationService {
         const diffHours = Math.floor((new Date().getTime() - launchTime.getTime()) / (1000 * 60 * 60));
         if (diffHours > 24) return `${Math.floor(diffHours / 24)}d ${diffHours % 24}h`;
         return `${diffHours}h`;
+    }
+    /**
+     * Launches a new t3.micro EC2 instance safely. 
+     */
+    async launchEc2Instance(perRequest: PerRequestCredentials, region: string, amiId: string = "ami-0ebfd941bbafe70c6") {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) throw new Error("AWS credentials required to launch instance");
+
+        const client = new EC2Client({
+            region: region || resolved.region,
+            credentials: resolved.credentials,
+        });
+
+        // Using Amazon Linux 2 AMI as default, strictly forcing t3.micro to prevent expensive accidents
+        const command = new RunInstancesCommand({
+            ImageId: amiId,
+            InstanceType: "t3.micro",
+            MinCount: 1,
+            MaxCount: 1,
+            TagSpecifications: [
+                {
+                    ResourceType: "instance",
+                    Tags: [{ Key: "Name", Value: `Interdictor-DeployedNode-${Date.now()}` }],
+                },
+            ],
+        });
+
+        return await client.send(command);
+    }
+
+    /**
+     * Terminates an existing EC2 instance by its InstanceId.
+     */
+    async terminateEc2Instance(perRequest: PerRequestCredentials, region: string, instanceId: string) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) throw new Error("AWS credentials required to terminate instance");
+        if (!instanceId || !region) throw new Error("Region and InstanceId are required to terminate");
+
+        const client = new EC2Client({
+            region: region,
+            credentials: resolved.credentials,
+        });
+
+        const command = new TerminateInstancesCommand({
+            InstanceIds: [instanceId],
+        });
+
+        return await client.send(command);
+    }
+
+    /**
+     * Stops a running EC2 instance (hibernate-safe).
+     */
+    async stopEc2Instance(perRequest: PerRequestCredentials, region: string, instanceId: string) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) throw new Error("AWS credentials required to stop instance");
+        if (!instanceId || !region) throw new Error("Region and InstanceId are required to stop");
+
+        const client = new EC2Client({
+            region: region,
+            credentials: resolved.credentials,
+        });
+
+        return await client.send(new StopInstancesCommand({ InstanceIds: [instanceId] }));
+    }
+
+    /**
+     * Starts a stopped EC2 instance.
+     */
+    async startEc2Instance(perRequest: PerRequestCredentials, region: string, instanceId: string) {
+        const resolved = resolveCredentials(perRequest);
+        if (!resolved) throw new Error("AWS credentials required to start instance");
+        if (!instanceId || !region) throw new Error("Region and InstanceId are required to start");
+
+        const client = new EC2Client({
+            region: region,
+            credentials: resolved.credentials,
+        });
+
+        return await client.send(new StartInstancesCommand({ InstanceIds: [instanceId] }));
     }
 }

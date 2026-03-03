@@ -13,11 +13,12 @@ export interface TelemetryData {
   networkLatency: number;
   anomalies: Anomaly[];
   serverLoad: { region: string; load: number }[];
-  cpuUsage: number;
-  memoryUsage: number;
+  cpuUsage: number | null;
+  memoryUsage: number | null;
   computeNodes?: any[] | null;
   billingData?: number | null;
   storageArrays?: any[] | null;
+  accessLogs?: any[] | null;
 }
 
 export class TelemetryService {
@@ -80,12 +81,8 @@ export class TelemetryService {
 
   async fetchActiveAnomalies(credentials?: PerRequestCredentials | null): Promise<Anomaly[]> {
     if (credentials) {
-      // Create a fake anomaly array just the right size of the GuardDuty count for the overview dashboard metric
-      const count = await this.awsService.getGuardDutyAnomalies(credentials) || 0;
-      return Array.from({ length: count }, (_, i) => ({
-        id: `AWS-GD-${Date.now().toString(36).toUpperCase()}-${i}`,
-        lat: 0, lng: 0, severity: 'HIGH'
-      }));
+      const liveAnomalies = await this.awsService.getGuardDutyAnomalies(credentials);
+      return Array.isArray(liveAnomalies) ? liveAnomalies : [];
     }
     try {
       const res = await fetch(`${process.env.CLOUDWATCH_URL || 'http://localhost:8080'}/api/v1/anomalies/active`);
@@ -144,6 +141,14 @@ export class TelemetryService {
     } catch { return this.simulateCompute(); }
   }
 
+  async fetchBillingData(credentials?: PerRequestCredentials | null): Promise<number | null> {
+    if (credentials) {
+      return await this.awsService.getBillingData(credentials);
+    }
+    // Simulate a fluctuating bill for demo purposes
+    return 1245.50 + Math.random() * 10;
+  }
+
   /**
    * Aggregate all telemetry.
    * @param credentials  Per-request AWS keys from the Live Mode socket.
@@ -151,16 +156,28 @@ export class TelemetryService {
    */
   async getAggregatedTelemetry(credentials?: PerRequestCredentials | null): Promise<TelemetryData> {
     const computeNodes = await this.awsService.getComputeNodes(credentials);
-    const billingData = await this.awsService.getBillingData(credentials);
     const storageArrays = await this.awsService.getStorageVolumes(credentials);
+    const accessLogs = await this.awsService.getCloudTrailEvents(credentials);
 
-    const [health, latency, anomalies, load, compute] = await Promise.all([
+    const [health, latency, anomalies, load] = await Promise.all([
       this.fetchGlobalHealth(credentials, computeNodes),
       this.fetchNetworkLatency(credentials),
       this.fetchActiveAnomalies(credentials),
       this.fetchServerLoad(credentials, computeNodes),
-      this.fetchComputeMetrics(credentials),
     ]);
+
+    // Do NOT automatically poll paid AWS APIs.
+    let cpuUsage: number | null = null;
+    let memoryUsage: number | null = null;
+    let billingData: number | null = null;
+
+    if (!credentials) {
+      // Demo mode: safe to fetch simulated data automatically
+      const compute = await this.fetchComputeMetrics(null);
+      cpuUsage = compute.cpu;
+      memoryUsage = compute.memory;
+      billingData = await this.fetchBillingData(null);
+    }
 
     return {
       timestamp: Date.now(),
@@ -168,11 +185,12 @@ export class TelemetryService {
       networkLatency: latency,
       anomalies,
       serverLoad: load,
-      cpuUsage: compute.cpu,
-      memoryUsage: compute.memory,
+      cpuUsage,
+      memoryUsage,
       computeNodes,
       billingData,
       storageArrays,
+      accessLogs,
     };
   }
 }

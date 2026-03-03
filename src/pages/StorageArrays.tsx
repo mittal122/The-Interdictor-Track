@@ -59,7 +59,7 @@ function getLatencyBorderColor(latency: number): string {
 
 // --- Component ---
 export function StorageArrays() {
-    const { mode } = useAppMode();
+    const { mode, selectedRegion } = useAppMode();
     const { telemetry } = useSocket();
     const [simulatedArrays, setSimulatedArrays] = useState<StorageArray[]>(() => generateArrays());
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -79,27 +79,28 @@ export function StorageArrays() {
     // Derive the final arrays from either live AWS telemetry or the local simulator
     const arrays = useMemo(() => {
         if (isLive) {
-            // Live AWS EBS Data
-            // CloudWatch limits real-time IOPS frequency, so we map real volumes and simulate safe jitter for visuals
-            return telemetry.storageArrays.map((vol: any) => {
-                const isSsd = ['gp2', 'gp3', 'io1', 'io2'].includes(vol.type);
-                const writeLatency = isSsd ? 10 + Math.random() * 90 : 200 + Math.random() * 500;
+            // Live AWS EBS Data: 100% REAL. No simulated jitter.
+            let volumes = telemetry.storageArrays;
+            if (selectedRegion !== 'global') {
+                volumes = volumes.filter((vol: any) => vol.region === selectedRegion);
+            }
+            return volumes.map((vol: any) => {
                 return {
                     id: vol.id,
                     name: vol.name || vol.type,
-                    capacity: parseFloat((vol.capacity / 1024).toFixed(3)), // AWS gives GiB, we want TB
-                    used: parseFloat(((vol.capacity / 1024) * (0.3 + Math.random() * 0.4)).toFixed(3)), // Simulate usage jitter
-                    writeLatency: Math.round(writeLatency),
-                    readLatency: Math.round(writeLatency * 0.4),
-                    iops: vol.iops || Math.round(1000 + Math.random() * 5000),
-                    throughput: vol.throughput || Math.round(50 + Math.random() * 200),
+                    capacity: parseFloat((vol.capacity / 1024).toFixed(3)) || 0.001, // AWS is GiB, UI expects TB. Use 0.001 to avoid NaN
+                    used: 0, // AWS EBS does not know filesystem usage without an OS Agent
+                    writeLatency: 0, // Requires CloudWatch metric for VolumeWriteTime
+                    readLatency: 0,
+                    iops: vol.iops || 0, // Real AWS Provisioned IOPS
+                    throughput: vol.throughput || 0, // Real AWS Provisioned Throughput (MB/s)
                     status: ['in-use', 'available'].includes(vol.status) ? "online" : vol.status === 'error' ? "degraded" : "offline",
                     region: vol.region,
                 } as StorageArray;
             });
         }
         return simulatedArrays;
-    }, [isLive, telemetry?.storageArrays, simulatedArrays]);
+    }, [isLive, telemetry?.storageArrays, simulatedArrays, selectedRegion]);
 
     const selected = useMemo(() => arrays.find(a => a.id === selectedId) || null, [arrays, selectedId]);
 
@@ -178,7 +179,11 @@ export function StorageArrays() {
                                 )}
                             >
                                 <div className="text-[9px] sm:text-[10px] font-bold text-zinc-100 tracking-wider truncate">{arr.id}</div>
-                                <div className="text-base sm:text-lg font-mono font-bold text-white mt-1">{arr.writeLatency}<span className="text-[9px] sm:text-[10px] font-normal ml-0.5">µs</span></div>
+                                {isLive ? (
+                                    <div className="text-sm font-mono font-bold text-zinc-500 mt-1">N/A</div>
+                                ) : (
+                                    <div className="text-base sm:text-lg font-mono font-bold text-white mt-1">{arr.writeLatency}<span className="text-[9px] sm:text-[10px] font-normal ml-0.5">µs</span></div>
+                                )}
                                 <div className="text-[8px] sm:text-[9px] text-zinc-200/80 mt-0.5 truncate">{arr.name}</div>
                             </button>
                         ))}
@@ -198,21 +203,23 @@ export function StorageArrays() {
                                 </div>
                             </div>
                             <DetailRow label="Status" value={selected.status.toUpperCase()} color={selected.status === "online" ? "text-emerald-400" : selected.status === "degraded" ? "text-yellow-400" : "text-red-400"} />
-                            <DetailRow label="Write Latency" value={`${selected.writeLatency} µs`} />
-                            <DetailRow label="Read Latency" value={`${selected.readLatency} µs`} />
-                            <DetailRow label="IOPS" value={selected.iops.toLocaleString()} />
-                            <DetailRow label="Throughput" value={`${selected.throughput} MB/s`} />
-                            <DetailRow label="Capacity" value={`${selected.used} / ${selected.capacity} TB`} />
+                            <DetailRow label="Write Latency" value={isLive ? "N/A (CloudWatch)" : `${selected.writeLatency} µs`} />
+                            <DetailRow label="Read Latency" value={isLive ? "N/A (CloudWatch)" : `${selected.readLatency} µs`} />
+                            <DetailRow label="Prov. IOPS" value={selected.iops.toLocaleString()} />
+                            <DetailRow label="Prov. Throughput" value={`${selected.throughput} MB/s`} />
+                            <DetailRow label="Capacity" value={isLive ? `Unknown / ${selected.capacity} TB` : `${selected.used} / ${selected.capacity} TB`} />
                             {/* Capacity bar */}
-                            <div className="mt-2">
-                                <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
-                                    <div
-                                        className={cn("h-full rounded-full transition-all", selected.used / selected.capacity > 0.85 ? "bg-red-500" : selected.used / selected.capacity > 0.7 ? "bg-yellow-500" : "bg-emerald-500")}
-                                        style={{ width: `${(selected.used / selected.capacity) * 100}%` }}
-                                    />
+                            {!isLive && (
+                                <div className="mt-2">
+                                    <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
+                                        <div
+                                            className={cn("h-full rounded-full transition-all", selected.used / selected.capacity > 0.85 ? "bg-red-500" : selected.used / selected.capacity > 0.7 ? "bg-yellow-500" : "bg-emerald-500")}
+                                            style={{ width: `${(selected.used / selected.capacity) * 100}%` }}
+                                        />
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500 mt-1">{((selected.used / selected.capacity) * 100).toFixed(0)}% utilized</div>
                                 </div>
-                                <div className="text-[10px] text-zinc-500 mt-1">{((selected.used / selected.capacity) * 100).toFixed(0)}% utilized</div>
-                            </div>
+                            )}
                         </div>
                     ) : (
                         <div className="flex flex-col items-center justify-center h-48 text-zinc-600">

@@ -1,13 +1,27 @@
-import React, { useEffect, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Server, FlaskConical, Wifi } from "lucide-react";
+import React, { useEffect, useState, useMemo } from "react";
+import { Activity, AlertTriangle, CheckCircle2, Server, FlaskConical, Wifi, MapPin, LogOut } from "lucide-react";
 import { cn } from "../utils/cn";
 import { useAppMode } from "../contexts/AppModeContext";
+import { useCredentials } from "../contexts/CredentialsContext";
 
 export function Header({ telemetry }: { telemetry: any }) {
-  const { mode, setMode } = useAppMode();
+  const { mode, setMode, selectedRegion, setSelectedRegion } = useAppMode();
+  const { clearCredentials } = useCredentials();
   const isCritical = telemetry?.globalHealth < 90;
   const hasAnomalies = (telemetry?.anomalies?.length ?? 0) > 0;
   const [time, setTime] = useState(new Date());
+
+  const availableRegions = useMemo(() => {
+    if (!telemetry) return [];
+    const regions = new Set<string>();
+    if (telemetry.computeNodes) {
+      telemetry.computeNodes.forEach((n: any) => { if (n.region) regions.add(n.region); });
+    }
+    if (telemetry.storageArrays) {
+      telemetry.storageArrays.forEach((a: any) => { if (a.region) regions.add(a.region); });
+    }
+    return Array.from(regions).sort();
+  }, [telemetry]);
 
   // Tick the clock every second
   useEffect(() => {
@@ -16,6 +30,11 @@ export function Header({ telemetry }: { telemetry: any }) {
   }, []);
 
   const handleToggle = () => setMode(mode === 'demo' ? 'live' : 'demo');
+
+  const handleDisconnectAWS = () => {
+    clearCredentials(); // Wipe transient + localStorage keys
+    setMode('demo');
+  };
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-4 shrink-0">
@@ -58,8 +77,7 @@ export function Header({ telemetry }: { telemetry: any }) {
           onClick={handleToggle}
           title={mode === 'demo' ? "Switch to Live Mode (connects to real backend)" : "Switch to Demo Mode (simulated data)"}
           className={cn(
-            "relative flex items-center gap-0 rounded-full p-0.5 transition-all duration-300 cursor-pointer",
-            "border",
+            "relative flex items-center gap-0 rounded-full p-0.5 transition-all duration-300 cursor-pointer border",
             mode === 'live'
               ? "border-emerald-700/60 bg-emerald-950/50"
               : "border-yellow-700/60 bg-yellow-950/40"
@@ -78,24 +96,52 @@ export function Header({ telemetry }: { telemetry: any }) {
 
           {/* LIVE pill */}
           <span className={cn(
-            "flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest transition-all duration-300",
-            mode === 'live'
-              ? "bg-emerald-500/20 text-emerald-300"
-              : "text-zinc-500"
-          )}>
-            <Wifi className="h-3 w-3" />
-            Live
-          </span>
-        </button>
+          "flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest transition-all duration-300",
+          mode === 'live'
+            ? "bg-emerald-500/20 text-emerald-300"
+            : "text-zinc-500"
+        )}>
+          <Wifi className="h-3 w-3" />
+          Live
+        </span>
+      </button>
 
-        {/* Clock */}
-        <div className="hidden md:flex items-center gap-2">
-          <span className="text-xs text-zinc-500 uppercase tracking-wider">Time</span>
-          <span className="text-xs font-medium text-zinc-300 font-mono">
-            {time.toISOString().split('T')[1].split('.')[0]} UTC
-          </span>
+      {/* Explicit AWS Disconnect Button (Live Mode Only) */}
+      {mode === 'live' && (
+        <button
+          onClick={handleDisconnectAWS}
+          title="Disconnect AWS Account"
+          className="flex items-center justify-center p-1.5 rounded-full border border-red-900/40 bg-red-950/20 text-red-400 hover:bg-red-900/40 hover:text-red-300 transition-colors cursor-pointer"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
+      )}
+
+      {/* Region Selector (Live Mode Only) */}
+      {mode === 'live' && (
+        <div className="hidden lg:flex items-center gap-2 border-l border-zinc-800 pl-4">
+          <MapPin className="h-3.5 w-3.5 text-zinc-500" />
+          <select
+            value={selectedRegion}
+            onChange={(e) => setSelectedRegion(e.target.value)}
+            className="bg-transparent border border-zinc-800 hover:border-zinc-700 text-xs text-zinc-300 rounded px-2 py-1 outline-none transition-colors cursor-pointer"
+          >
+            <option value="global" className="bg-zinc-900">Global (All Regions)</option>
+            {availableRegions.map(r => (
+              <option key={r} value={r} className="bg-zinc-900 text-emerald-400">{r}</option>
+            ))}
+          </select>
         </div>
+      )}
+
+      {/* Clock */}
+      <div className="hidden md:flex items-center gap-2 border-l border-zinc-800 pl-4">
+        <span className="text-xs text-zinc-500 uppercase tracking-wider">Time</span>
+        <span className="text-xs font-medium text-zinc-300 font-mono">
+          {time.toISOString().split('T')[1].split('.')[0]} UTC
+        </span>
       </div>
-    </header>
+    </div>
+    </header >
   );
 }

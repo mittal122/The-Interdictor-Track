@@ -1,15 +1,53 @@
-import React from "react";
+import React, { useState } from "react";
 import { KPICard } from "./charts/KPICard";
+import { OnDemandMetricCard } from "./charts/OnDemandMetricCard";
 import { LatencyChart } from "./charts/LatencyChart";
 import { ServerLoadChart } from "./charts/ServerLoadChart";
 import { CommandModule } from "./CommandModule";
-import { Activity, AlertTriangle, Cpu, Network } from "lucide-react";
+import { Activity, AlertTriangle, Cpu, Network, DollarSign } from "lucide-react";
 import { useSocket } from "../contexts/SocketContext";
 import { useAuth } from "../contexts/AuthContext";
 
+import { useAppMode } from "../contexts/AppModeContext";
+
 export function Dashboard({ telemetry: _propTelemetry }: { telemetry: any }) {
-  const { telemetry } = useSocket();
+  const { telemetry, socket } = useSocket();
   const { user } = useAuth();
+  const { selectedRegion } = useAppMode();
+
+  const [fetchedCpu, setFetchedCpu] = useState<number | null>(null);
+  const [fetchedBilling, setFetchedBilling] = useState<number | null>(null);
+
+  const displayCpu = fetchedCpu ?? telemetry?.cpuUsage;
+  const displayBilling = fetchedBilling ?? telemetry?.billingData;
+
+  const handleFetchCpu = async () => {
+    if (!socket) return;
+    return new Promise<void>((resolve, reject) => {
+      socket.emit("fetch_cpu_data", (response: any) => {
+        if (response.status === "success") {
+          setFetchedCpu(response.data);
+          resolve();
+        } else {
+          reject(new Error(response.message));
+        }
+      });
+    });
+  };
+
+  const handleFetchBilling = async () => {
+    if (!socket) return;
+    return new Promise<void>((resolve, reject) => {
+      socket.emit("fetch_billing_data", (response: any) => {
+        if (response.status === "success") {
+          setFetchedBilling(response.data);
+          resolve();
+        } else {
+          reject(new Error(response.message));
+        }
+      });
+    });
+  };
 
   if (!telemetry) {
     return (
@@ -39,7 +77,7 @@ export function Dashboard({ telemetry: _propTelemetry }: { telemetry: any }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
         <KPICard
           title="Global Health"
           value={`${telemetry.globalHealth.toFixed(1)}%`}
@@ -62,12 +100,21 @@ export function Dashboard({ telemetry: _propTelemetry }: { telemetry: any }) {
           trend={activeAnomaliesCount > 0 ? "up" : "neutral"}
           status={activeAnomaliesCount > 1 ? "critical" : activeAnomaliesCount === 1 ? "warning" : "nominal"}
         />
-        <KPICard
+        <OnDemandMetricCard
           title="Core Compute"
-          value={`${telemetry.cpuUsage.toFixed(1)}%`}
+          value={displayCpu !== null && displayCpu !== undefined ? `${displayCpu.toFixed(1)}%` : null}
+          costLabel="$0.01 / 1k req"
           icon={Cpu}
           trend="up"
-          status={telemetry.cpuUsage > 80 ? "warning" : "nominal"}
+          status={displayCpu !== null && displayCpu > 80 ? "warning" : "nominal"}
+          onFetch={handleFetchCpu}
+        />
+        <OnDemandMetricCard
+          title="Monthly AWS Bill"
+          value={displayBilling !== null && displayBilling !== undefined ? `$${displayBilling.toFixed(2)}` : null}
+          costLabel="$0.01 / req"
+          icon={DollarSign}
+          onFetch={handleFetchBilling}
         />
       </div>
 
@@ -97,7 +144,11 @@ export function Dashboard({ telemetry: _propTelemetry }: { telemetry: any }) {
               </span>
             </div>
             <div className="h-[calc(100%-2rem)] w-full">
-              <ServerLoadChart data={telemetry.serverLoad} />
+              <ServerLoadChart data={
+                selectedRegion === 'global'
+                  ? telemetry.serverLoad
+                  : telemetry.serverLoad.filter((l: any) => l.region === selectedRegion)
+              } />
             </div>
           </div>
         </div>

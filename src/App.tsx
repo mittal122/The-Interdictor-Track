@@ -7,7 +7,8 @@ import { CredentialsProvider } from "./contexts/CredentialsContext";
 import { Login } from "./pages/Login";
 import { DashboardLayout } from "./layouts/DashboardLayout";
 import { Dashboard } from "./components/Dashboard";
-import { ThreatMap } from "./pages/ThreatMap";
+import { AwsOverview } from "./pages/AwsOverview";
+import { AwsArchitecture } from "./pages/AwsArchitecture";
 import { StorageArrays } from "./pages/StorageArrays";
 import { ComputeClusters } from "./pages/ComputeClusters";
 import { GlobalNodes } from "./pages/GlobalNodes";
@@ -27,7 +28,8 @@ export default function App() {
                 <Route path="/" element={<DashboardLayout />}>
                   <Route index element={<Navigate to="/dashboard" replace />} />
                   <Route path="dashboard" element={<Dashboard telemetry={null} />} />
-                  <Route path="threat-map" element={<ThreatMap />} />
+                  <Route path="aws-overview" element={<AwsOverview />} />
+                  <Route path="aws-architecture" element={<AwsArchitecture />} />
                   <Route path="storage-arrays" element={<StorageArrays />} />
                   <Route path="compute-clusters" element={<ComputeClusters />} />
                   <Route path="global-nodes" element={<GlobalNodes />} />
