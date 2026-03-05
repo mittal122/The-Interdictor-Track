@@ -13,6 +13,8 @@ import { TelemetryService } from "./src/services/telemetryService";
 import { AlertingWorker } from "./src/services/alertingWorker";
 import { runAnalysis } from "./src/services/nimAnalystService";
 import { generateLayout } from "./src/services/nimLayoutService";
+import { estimateCosts } from "./src/services/costEstimationService";
+import { generateTerraform } from "./src/services/terraformExportService";
 import { AwsIntegrationService } from "./src/services/awsIntegrationService";
 import { PerRequestCredentials } from "./src/services/awsIntegrationService";
 import { getFullAccountInfrastructure } from "./src/services/awsInfrastructureEngine";
@@ -332,6 +334,30 @@ async function startServer() {
         callback({ status: "success", data: layoutPlan });
       } catch (err: any) {
         console.error("Layout Generation Error:", err);
+        callback({ status: "error", message: err.message });
+      }
+    });
+
+    // ── Cost Estimation ───────────────────────────────────────────────────
+    socket.on("estimate_costs", async (data, callback) => {
+      try {
+        console.log("[COST] Cost estimation requested...");
+        const costs = estimateCosts(data.infraData);
+        callback({ status: "success", data: costs });
+      } catch (err: any) {
+        console.error("Cost Estimation Error:", err);
+        callback({ status: "error", message: err.message });
+      }
+    });
+
+    // ── Terraform Export ──────────────────────────────────────────────────
+    socket.on("export_terraform", async (data, callback) => {
+      try {
+        console.log("[TERRAFORM] Export requested...");
+        const tfOutput = generateTerraform(data.infraData);
+        callback({ status: "success", data: tfOutput });
+      } catch (err: any) {
+        console.error("Terraform Export Error:", err);
         callback({ status: "error", message: err.message });
       }
     });

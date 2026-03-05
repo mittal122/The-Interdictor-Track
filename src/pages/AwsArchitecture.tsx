@@ -2,13 +2,26 @@ import React, { useState, useMemo, useCallback } from "react";
 import {
     Cloud, Server, HardDrive, Globe2, Network, Shield, Radio, Zap, Database,
     Play, Square, Trash2, Loader2, ChevronDown, ChevronRight, AlertTriangle,
-    CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers, GitMerge, Lock
+    CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers, GitMerge, Lock,
+    DollarSign, FileCode, Box, Maximize, Minimize
 } from "lucide-react";
 import ReactFlow, { Background, Controls, MarkerType, NodeProps, Handle, Position, Edge, Node as FlowNode } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
+import { Isometric3DView } from "../components/Isometric3DView";
+import { CostEstimationPanel } from "../components/CostEstimationPanel";
+import { TerraformExportModal } from "../components/TerraformExportModal";
+
+// ── Constants ─────────────────────────────────────────────────────────────
+const API_COST_MAP: Record<string, string> = {
+    scan_account: "$0.002",
+    estimate_costs: "$0.001",
+    terraform_export: "$0.0005",
+    start_instance: "Free",
+    stop_instance: "Free",
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────
 type ResourceStatus = "active" | "stopped" | "idle" | "orphan" | "pending";
@@ -469,8 +482,34 @@ export function AwsArchitecture() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
-    const [viewMode, setViewMode] = useState<"tree" | "graph">("tree");
+    const [viewMode, setViewMode] = useState<"tree" | "graph" | "3d">("tree");
     const [selectedRegion, setSelectedRegion] = useState<string>("global");
+    const [showCostPanel, setShowCostPanel] = useState(false);
+    const [showTfExport, setShowTfExport] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const containerRef = React.useRef<HTMLDivElement>(null);
+
+    // Fullscreen listener
+    React.useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []);
+
+    const toggleFullscreen = () => {
+        if (!isFullscreen) {
+            containerRef.current?.requestFullscreen().catch(err => {
+                console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+            });
+        } else {
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            }
+        }
+    };
+
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["networking", "compute", "storage", "load-balancing", "database", "security"]));
     const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
     const [selectedNode, setSelectedNode] = useState<InfraNode | null>(null);
@@ -608,6 +647,12 @@ export function AwsArchitecture() {
                         >
                             <GitMerge className="h-3 w-3" /> Visual Graph
                         </button>
+                        <button
+                            onClick={() => setViewMode("3d")}
+                            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition", viewMode === "3d" ? "bg-violet-500/20 text-violet-400 shadow-sm" : "text-zinc-500 hover:text-zinc-300")}
+                        >
+                            <Box className="h-3 w-3" /> 3D View
+                        </button>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -632,11 +677,47 @@ export function AwsArchitecture() {
                         <button
                             onClick={handleFetch}
                             disabled={loading}
-                            className="inline-flex items-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wider text-sky-400 hover:bg-sky-500/20 transition disabled:opacity-50"
+                            title="This action calls AWS APIs which may incur small usage charges depending on your AWS account."
+                            className="inline-flex items-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wider text-sky-400 hover:bg-sky-500/20 transition disabled:opacity-50 group relative"
                         >
                             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                            {loading ? "Scanning…" : "Scan Account"}
+                            <span>{loading ? "Scanning…" : "Scan Account"}</span>
+                            {!loading && (
+                                <span className="ml-1 text-[9px] text-sky-300 opacity-80 backdrop-blur-sm bg-sky-950/50 px-1.5 py-0.5 rounded">
+                                    {API_COST_MAP.scan_account}
+                                </span>
+                            )}
                         </button>
+                    )}
+                    {data && (
+                        <>
+                            <button
+                                onClick={() => setShowCostPanel(!showCostPanel)}
+                                title="This action calls AWS APIs which may incur small usage charges depending on your AWS account."
+                                className={cn("inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-bold uppercase tracking-wider transition group relative",
+                                    showCostPanel
+                                        ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-400"
+                                        : "border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-emerald-400 hover:border-emerald-500/30"
+                                )}
+                            >
+                                <DollarSign className="h-3 w-3" />
+                                <span>Cost</span>
+                                <span className={cn("ml-1 text-[8px] px-1 py-0.5 rounded", showCostPanel ? "bg-emerald-950/60 text-emerald-300" : "bg-zinc-700 text-zinc-400 group-hover:bg-emerald-950 group-hover:text-emerald-300")}>
+                                    {API_COST_MAP.estimate_costs}
+                                </span>
+                            </button>
+                            <button
+                                onClick={() => setShowTfExport(true)}
+                                title="This action calls AWS APIs which may incur small usage charges depending on your AWS account."
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700/50 bg-zinc-800/50 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-violet-400 hover:border-violet-500/30 transition group relative"
+                            >
+                                <FileCode className="h-3 w-3" />
+                                <span>Terraform</span>
+                                <span className="ml-1 text-[8px] px-1 py-0.5 rounded bg-zinc-700 text-zinc-400 group-hover:bg-violet-950 group-hover:text-violet-300">
+                                    {API_COST_MAP.terraform_export}
+                                </span>
+                            </button>
+                        </>
                     )}
                     {!isLive && (
                         <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-semibold text-amber-400 uppercase tracking-widest">
@@ -679,11 +760,34 @@ export function AwsArchitecture() {
 
             {/* Main Content Grid */}
             {data && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 shrink-0 min-h-[600px]">
                     {/* View Area (2 cols) */}
-                    <div className="lg:col-span-2 relative">
+                    <div
+                        ref={containerRef}
+                        className={cn(
+                            "transition-all duration-300 relative",
+                            isFullscreen
+                                ? "fixed inset-0 z-50 bg-zinc-950 p-4 w-screen h-screen flex flex-col overflow-hidden"
+                                : "lg:col-span-2"
+                        )}
+                    >
+                        {/* Fullscreen Toggle */}
+                        <div className={cn("absolute z-50", isFullscreen ? "top-6 right-6" : "top-3 right-3")}>
+                            {/* We push it down slightly if it's the 3d mode inside the normal view so we don't block the 3D badge */}
+                            <button
+                                onClick={toggleFullscreen}
+                                className={cn(
+                                    "p-2 rounded-lg backdrop-blur shadow-lg border transition",
+                                    viewMode === '3d' && !isFullscreen ? "mt-10 bg-zinc-900/60 border-zinc-700 text-zinc-400 hover:text-zinc-200" : "bg-zinc-900/80 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                                )}
+                                title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+                            >
+                                {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                            </button>
+                        </div>
+
                         {viewMode === "tree" ? (
-                            <div className="h-full rounded-xl border border-zinc-800/50 bg-zinc-900/20 p-4 overflow-y-auto max-h-[70vh]">
+                            <div className={cn("rounded-xl border border-zinc-800/50 bg-zinc-900/20 p-4 overflow-y-auto", isFullscreen ? "flex-1" : "h-full max-h-[70vh]")}>
                                 <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4 flex items-center gap-2">
                                     <Boxes className="h-3.5 w-3.5" /> Hierarchical Resource View
                                 </h3>
@@ -744,8 +848,8 @@ export function AwsArchitecture() {
                                                                                 <button
                                                                                     onClick={(e) => { e.stopPropagation(); handleAction("stop", node.id, node.instanceId || node.id, node.region); }}
                                                                                     disabled={actionLoading === node.id}
-                                                                                    className="ml-1 p-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
-                                                                                    title="Stop Instance"
+                                                                                    className="ml-1 p-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition group relative"
+                                                                                    title={`Stop Instance (${API_COST_MAP.stop_instance}. API call may incur minor usage charge)`}
                                                                                 >
                                                                                     {actionLoading === node.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Square className="h-2.5 w-2.5" />}
                                                                                 </button>
@@ -754,8 +858,8 @@ export function AwsArchitecture() {
                                                                                 <button
                                                                                     onClick={(e) => { e.stopPropagation(); handleAction("start", node.id, node.instanceId || node.id, node.region); }}
                                                                                     disabled={actionLoading === node.id}
-                                                                                    className="ml-1 p-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition"
-                                                                                    title="Start Instance"
+                                                                                    className="ml-1 p-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition group relative"
+                                                                                    title={`Start Instance (${API_COST_MAP.start_instance}. API call may incur minor usage charge)`}
                                                                                 >
                                                                                     {actionLoading === node.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Play className="h-2.5 w-2.5" />}
                                                                                 </button>
@@ -772,92 +876,112 @@ export function AwsArchitecture() {
                                     </div>
                                 ))}
                             </div>
-                        ) : (
+                        ) : viewMode === "graph" ? (
                             <ArchitectureGraph data={data} selectedNodeId={selectedNode?.id || null} onSelect={setSelectedNode} />
+                        ) : (
+                            <Isometric3DView data={data} />
                         )}
                     </div>
 
                     {/* Detail Panel (1 col) */}
-                    <div className="rounded-xl border border-zinc-800/50 bg-zinc-900/20 p-4 overflow-y-auto max-h-[70vh]">
-                        <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4">Resource Details</h3>
-                        {selectedNode ? (
-                            <div className="space-y-4">
-                                {/* Header */}
-                                <div className="flex items-center gap-2">
-                                    {React.createElement(TYPE_ICON[selectedNode.type] || Boxes, { className: "h-5 w-5 text-sky-400" })}
-                                    <div>
-                                        <div className="text-sm font-bold text-zinc-100">{selectedNode.name}</div>
-                                        <div className="text-[10px] text-zinc-500 uppercase tracking-widest">{TYPE_LABEL[selectedNode.type]}</div>
-                                    </div>
-                                </div>
-                                <StatusBadge status={selectedNode.status} />
-
-                                {/* Meta table */}
-                                <div className="space-y-1">
-                                    <DetailRow label="Region" value={selectedNode.region} />
-                                    <DetailRow label="Category" value={CATEGORY_LABEL[selectedNode.category] || selectedNode.category} />
-                                    {Object.entries(selectedNode.meta).map(([key, value]) => (
-                                        <DetailRow key={key} label={key} value={String(value ?? "—")} />
-                                    ))}
-                                </div>
-
-                                {/* Connections */}
-                                {connections.length > 0 && (
-                                    <div>
-                                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2 mt-4">Connections ({connections.length})</h4>
-                                        <div className="space-y-1">
-                                            {connections.map((conn, i) => (
-                                                <button
-                                                    key={i}
-                                                    onClick={() => conn.node && setSelectedNode(conn.node)}
-                                                    className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded border border-zinc-800/30 hover:bg-zinc-800/20 transition text-[11px]"
-                                                >
-                                                    <span className={cn("text-[9px] uppercase tracking-widest font-bold w-8", conn.direction === "outgoing" ? "text-sky-500" : "text-purple-500")}>
-                                                        {conn.direction === "outgoing" ? "→" : "←"}
-                                                    </span>
-                                                    <span className="text-zinc-400 truncate flex-1">{conn.node?.name || conn.edge.target}</span>
-                                                    <span className="text-[9px] text-zinc-600">{conn.edge.label}</span>
-                                                </button>
-                                            ))}
+                    <div className="flex flex-col rounded-xl border border-zinc-800/50 bg-zinc-900/20 max-h-[70vh]">
+                        <div className="p-4 border-b border-zinc-800/50 shrink-0">
+                            <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500">Resource Details</h3>
+                        </div>
+                        <div className="p-4 overflow-y-auto flex-1 min-h-0">
+                            {selectedNode ? (
+                                <div className="space-y-4">
+                                    {/* Header */}
+                                    <div className="flex items-center gap-2">
+                                        {React.createElement(TYPE_ICON[selectedNode.type] || Boxes, { className: "h-5 w-5 text-sky-400" })}
+                                        <div>
+                                            <div className="text-sm font-bold text-zinc-100">{selectedNode.name}</div>
+                                            <div className="text-[10px] text-zinc-500 uppercase tracking-widest">{TYPE_LABEL[selectedNode.type]}</div>
                                         </div>
                                     </div>
-                                )}
+                                    <StatusBadge status={selectedNode.status} />
 
-                                {/* Actions */}
-                                {selectedNode.type === "ec2" && isLive && (
-                                    <div className="pt-3 border-t border-zinc-800/50 flex gap-2">
-                                        {selectedNode.status === "active" && (
-                                            <button
-                                                onClick={() => handleAction("stop", selectedNode.id, selectedNode.instanceId || selectedNode.id, selectedNode.region)}
-                                                disabled={actionLoading === selectedNode.id}
-                                                className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 hover:bg-red-500/20 transition disabled:opacity-40"
-                                            >
-                                                {actionLoading === selectedNode.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-                                                Stop Instance
-                                            </button>
-                                        )}
-                                        {selectedNode.status === "stopped" && (
-                                            <button
-                                                onClick={() => handleAction("start", selectedNode.id, selectedNode.instanceId || selectedNode.id, selectedNode.region)}
-                                                disabled={actionLoading === selectedNode.id}
-                                                className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:bg-emerald-500/20 transition disabled:opacity-40"
-                                            >
-                                                {actionLoading === selectedNode.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                                                Start Instance
-                                            </button>
-                                        )}
+                                    {/* Meta table */}
+                                    <div className="space-y-1">
+                                        <DetailRow label="Region" value={selectedNode.region} />
+                                        <DetailRow label="Category" value={CATEGORY_LABEL[selectedNode.category] || selectedNode.category} />
+                                        {Object.entries(selectedNode.meta).map(([key, value]) => (
+                                            <DetailRow key={key} label={key} value={String(value ?? "—")} />
+                                        ))}
                                     </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-48 text-zinc-600">
-                                <Boxes className="h-8 w-8 mb-2 opacity-50" />
-                                <p className="text-xs uppercase tracking-widest">Select a resource</p>
-                                <p className="text-[10px] text-zinc-700 mt-1">Click any item in the tree</p>
-                            </div>
-                        )}
+
+                                    {/* Connections */}
+                                    {connections.length > 0 && (
+                                        <div>
+                                            <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2 mt-4">Connections ({connections.length})</h4>
+                                            <div className="space-y-1">
+                                                {connections.map((conn, i) => (
+                                                    <button
+                                                        key={i}
+                                                        onClick={() => conn.node && setSelectedNode(conn.node)}
+                                                        className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded border border-zinc-800/30 hover:bg-zinc-800/20 transition text-[11px]"
+                                                    >
+                                                        <span className={cn("text-[9px] uppercase tracking-widest font-bold w-8", conn.direction === "outgoing" ? "text-sky-500" : "text-purple-500")}>
+                                                            {conn.direction === "outgoing" ? "→" : "←"}
+                                                        </span>
+                                                        <span className="text-zinc-400 truncate flex-1">{conn.node?.name || conn.edge.target}</span>
+                                                        <span className="text-[9px] text-zinc-600">{conn.edge.label}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Actions */}
+                                    {selectedNode.type === "ec2" && isLive && (
+                                        <div className="pt-3 border-t border-zinc-800/50 flex gap-2">
+                                            {selectedNode.status === "active" && (
+                                                <button
+                                                    onClick={() => handleAction("stop", selectedNode.id, selectedNode.instanceId || selectedNode.id, selectedNode.region)}
+                                                    disabled={actionLoading === selectedNode.id}
+                                                    title={`This action calls AWS APIs which may incur small usage charges (${API_COST_MAP.stop_instance}).`}
+                                                    className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 hover:bg-red-500/20 transition disabled:opacity-40"
+                                                >
+                                                    {actionLoading === selectedNode.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+                                                    <span>Stop Instance</span>
+                                                    <span className="ml-1 text-[8px] bg-red-950/60 text-red-300 px-1 py-0.5 rounded">{API_COST_MAP.stop_instance}</span>
+                                                </button>
+                                            )}
+                                            {selectedNode.status === "stopped" && (
+                                                <button
+                                                    onClick={() => handleAction("start", selectedNode.id, selectedNode.instanceId || selectedNode.id, selectedNode.region)}
+                                                    disabled={actionLoading === selectedNode.id}
+                                                    title={`This action calls AWS APIs which may incur small usage charges (${API_COST_MAP.start_instance}).`}
+                                                    className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:bg-emerald-500/20 transition disabled:opacity-40"
+                                                >
+                                                    {actionLoading === selectedNode.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                                                    <span>Start Instance</span>
+                                                    <span className="ml-1 text-[8px] bg-emerald-950/60 text-emerald-300 px-1 py-0.5 rounded">{API_COST_MAP.start_instance}</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center h-48 text-zinc-600">
+                                    <Boxes className="h-8 w-8 mb-2 opacity-50" />
+                                    <p className="text-xs uppercase tracking-widest">Select a resource</p>
+                                    <p className="text-[10px] text-zinc-700 mt-1">Click any item in the tree</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
+            )}
+
+            {/* Cost Estimation Panel */}
+            {data && showCostPanel && (
+                <CostEstimationPanel infraData={data} onClose={() => setShowCostPanel(false)} />
+            )}
+
+            {/* Terraform Export Modal */}
+            {data && showTfExport && (
+                <TerraformExportModal infraData={data} onClose={() => setShowTfExport(false)} />
             )}
 
             {/* Empty state for live mode */}
@@ -868,9 +992,14 @@ export function AwsArchitecture() {
                     <p className="text-xs text-zinc-700 mt-1 mb-4">Click "Scan Account" to discover your infrastructure</p>
                     <button
                         onClick={handleFetch}
+                        title="This action calls AWS APIs which may incur small usage charges depending on your AWS account."
                         className="inline-flex items-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wider text-sky-400 hover:bg-sky-500/20 transition"
                     >
-                        <RefreshCw className="h-4 w-4" /> Scan Account
+                        <RefreshCw className="h-4 w-4" />
+                        <span>Scan Account</span>
+                        <span className="ml-1 text-[9px] text-sky-300 opacity-80 backdrop-blur-sm bg-sky-950/50 px-1.5 py-0.5 rounded">
+                            {API_COST_MAP.scan_account}
+                        </span>
                     </button>
                 </div>
             )}
