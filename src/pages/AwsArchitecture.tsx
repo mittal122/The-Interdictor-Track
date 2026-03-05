@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import {
     Cloud, Server, HardDrive, Globe2, Network, Shield, Radio, Zap, Database,
     Play, Square, Trash2, Loader2, ChevronDown, ChevronRight, AlertTriangle,
-    CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers, GitMerge
+    CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers, GitMerge, Lock
 } from "lucide-react";
 import ReactFlow, { Background, Controls, MarkerType, NodeProps, Handle, Position, Edge, Node as FlowNode } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -147,110 +147,309 @@ function StatusBadge({ status }: { status: ResourceStatus }) {
     );
 }
 
-// ── Custom ReactFlow Node ─────────────────────────────────────────────────
+// ── Theming ───────────────────────────────────────────────────────────────
+const CAT_THEME: Record<string, { border: string, bg: string, text: string, iconBg: string }> = {
+    compute: { border: "border-orange-500/50", bg: "bg-orange-950/20", text: "text-orange-400", iconBg: "bg-orange-500/20" },
+    database: { border: "border-blue-500/50", bg: "bg-blue-950/20", text: "text-blue-400", iconBg: "bg-blue-500/20" },
+    storage: { border: "border-emerald-500/50", bg: "bg-emerald-950/20", text: "text-emerald-400", iconBg: "bg-emerald-500/20" },
+    networking: { border: "border-purple-500/50", bg: "bg-purple-950/20", text: "text-purple-400", iconBg: "bg-purple-500/20" },
+    security: { border: "border-red-500/50", bg: "bg-red-950/20", text: "text-red-400", iconBg: "bg-red-500/20" },
+    identity: { border: "border-pink-500/50", bg: "bg-pink-950/20", text: "text-pink-400", iconBg: "bg-pink-500/20" },
+    "load-balancing": { border: "border-indigo-500/50", bg: "bg-indigo-950/20", text: "text-indigo-400", iconBg: "bg-indigo-500/20" }
+};
+
+// ── Custom ReactFlow Nodes ────────────────────────────────────────────────
 function CustomNode({ data }: NodeProps) {
+    const theme = CAT_THEME[data.node.category] || { border: "border-zinc-700", bg: "bg-zinc-900/50", text: "text-zinc-300", iconBg: "bg-zinc-800" };
     const Icon = TYPE_ICON[data.node.type] || Boxes;
     const isSelected = data.selected;
 
     return (
         <div className={cn(
-            "relative flex flex-col items-center justify-center p-2 rounded-xl border-2 bg-zinc-900/90 shadow-lg min-w-[120px] transition-all",
-            isSelected ? "border-sky-500 shadow-sky-500/20" : "border-zinc-800",
-            STATUS_CONFIG[data.node.status]?.border.replace("border-", "border-t-")
+            "relative flex flex-col items-center justify-center p-3 rounded-xl border-2 shadow-lg min-w-[140px] transition-all backdrop-blur-sm",
+            theme.bg,
+            // When grouped, we need the background to be solid to occlude the group border behind it, so we add bg-zinc-950
+            "bg-zinc-950",
+            isSelected ? "border-sky-500 shadow-sky-500/30 scale-105 z-50" : theme.border,
+            STATUS_CONFIG[data.node.status]?.border.replace("border-", "border-l-4 border-l-")
         )}>
-            {/* Handles */}
-            <Handle type="target" position={Position.Top} className="!bg-zinc-600 !w-2 !h-2 !border-none" />
+            <Handle type="target" position={Position.Left} className="!bg-zinc-500 !w-2 !h-2 !border-none" />
 
-            <div className="flex flex-col items-center gap-1.5 p-1">
-                <div className={cn("p-1.5 rounded-lg", STATUS_CONFIG[data.node.status]?.bg)}>
-                    <Icon className={cn("h-5 w-5", STATUS_CONFIG[data.node.status]?.color)} />
+            <div className="flex flex-col items-center gap-2 w-full">
+                <div className={cn("p-2 rounded-lg", theme.iconBg)}>
+                    <Icon className={cn("h-6 w-6", theme.text)} />
                 </div>
-                <div className="text-[10px] font-bold text-zinc-200 text-center leading-tight truncate w-full px-1" title={data.node.name}>
+                <div className="text-[11px] font-bold text-zinc-100 text-center leading-tight truncate w-full px-1" title={data.node.name}>
                     {data.node.name}
                 </div>
-                <div className="text-[8px] text-zinc-500 uppercase tracking-widest bg-zinc-800/50 px-1.5 py-0.5 rounded">
-                    {TYPE_LABEL[data.node.type] || data.node.type}
+                <div className="flex items-center gap-1.5 justify-center w-full">
+                    <div className={cn("w-2 h-2 rounded-full", STATUS_CONFIG[data.node.status]?.bg.replace("/10", ""), STATUS_CONFIG[data.node.status]?.color.replace("text-", "bg-"))} />
+                    <div className="text-[9px] text-zinc-400 uppercase tracking-widest font-semibold flex items-center gap-1">
+                        {TYPE_LABEL[data.node.type] || data.node.type}
+                        {data.node.meta?.isPublic === false && <Lock className="h-2 w-2 text-zinc-500" />}
+                    </div>
                 </div>
             </div>
 
-            <Handle type="source" position={Position.Bottom} className="!bg-zinc-600 !w-2 !h-2 !border-none" />
+            <Handle type="source" position={Position.Right} className="!bg-zinc-500 !w-2 !h-2 !border-none" />
         </div>
     );
 }
 
-const nodeTypes = { custom: CustomNode };
+function GroupNode({ data }: NodeProps) {
+    const isVpc = data.node.type === "vpc";
+    return (
+        <div className={cn(
+            "w-full h-full rounded-2xl border-2 border-dashed relative p-4 transition-colors",
+            isVpc ? "border-emerald-500/30 bg-emerald-950/10" : "border-sky-500/30 bg-sky-950/10"
+        )}>
+            <div className="absolute -top-3 left-4 flex items-center gap-2 bg-zinc-950 px-3 py-1 rounded-md border border-zinc-800 shadow-md">
+                {isVpc ? <Globe2 className="h-3 w-3 text-emerald-400" /> : <Layers className="h-3 w-3 text-sky-400" />}
+                <span className={cn(
+                    "text-[10px] font-black uppercase tracking-widest",
+                    isVpc ? "text-emerald-400" : "text-sky-400"
+                )}>{data.node.name}</span>
+            </div>
+            {/* The nodes will be populated here by ReactFlow's parentNode mechanic */}
+        </div>
+    );
+}
 
-// ── Graph Component ───────────────────────────────────────────────────────
-function ArchitectureGraph({ data, selectedNodeId, onSelect }: { data: InfraMap; selectedNodeId: string | null; onSelect: (node: InfraNode) => void }) {
-    // Simple hierarchical layout algorithm
-    const { nodes: flowNodes, edges: flowEdges } = useMemo(() => {
-        const fNodes: FlowNode[] = [];
-        const fEdges: Edge[] = [];
-        const levels: Record<string, number> = {};
+const nodeTypes = { custom: CustomNode, group: GroupNode };
 
-        // Root layer: Region -> VPC -> Subnet -> Compute/DB -> Storage
-        const catLevel: Record<string, number> = {
-            "vpc": 0, "igw": 0, "route53-zone": 0, "iam-role": 0, "iam-user": 0,
-            "subnet": 1, "route-table": 1, "nat": 1,
-            "sg": 2, "elb": 2, "target-group": 2,
-            "ec2": 3, "rds": 3, "lambda": 3, "asg": 3,
-            "ebs": 4, "eip": 4, "s3": 4
+// ── Edge Color Classification ─────────────────────────────────────────────
+type EdgeCategory = 'networking' | 'traffic' | 'data' | 'security' | 'generic';
+
+const EDGE_COLORS: Record<EdgeCategory, { stroke: string; glow: string; label: string }> = {
+    networking: { stroke: '#38bdf8', glow: '0 0 8px #38bdf880', label: '#7dd3fc' },
+    traffic: { stroke: '#f97316', glow: '0 0 8px #f9731680', label: '#fdba74' },
+    data: { stroke: '#22c55e', glow: '0 0 8px #22c55e80', label: '#86efac' },
+    security: { stroke: '#a855f7', glow: '0 0 8px #a855f780', label: '#c084fc' },
+    generic: { stroke: '#71717a', glow: '0 0 6px #71717a60', label: '#a1a1aa' },
+};
+
+function classifyEdge(label: string): EdgeCategory {
+    if (['hosts', 'attached-to', 'contains-elb', 'has-route-table'].includes(label)) return 'networking';
+    if (label.includes('routes') || label.includes('forward')) return 'traffic';
+    if (label.includes('volume') || label.includes('storage') || label.includes('backup') || label.includes('s3')) return 'data';
+    if (label.includes('sg') || label.includes('iam') || label.includes('policy') || label.includes('role') || label.includes('permission')) return 'security';
+    return 'generic';
+}
+
+// ── Graph Component (AI-Assisted Layout) ──────────────────────────────────
+interface LayoutPlan {
+    nodes: { id: string; x: number; y: number; section: string }[];
+    sections: { name: string; x: number; y: number; width: number; height: number }[];
+    isAIGenerated: boolean;
+}
+
+function applyLayoutPlan(
+    data: InfraMap,
+    layout: LayoutPlan,
+    selectedNodeId: string | null,
+    hoveredNodeId: string | null,
+    hoveredEdgeId: string | null
+) {
+    const posMap = new Map(layout.nodes.map(n => [n.id, n]));
+
+    const groups: FlowNode[] = layout.sections.map((section, i) => ({
+        id: `section-${i}`,
+        type: "group",
+        position: { x: section.x, y: section.y },
+        data: {
+            node: {
+                id: `section-${i}`, type: "vpc", category: "networking",
+                name: section.name, region: "", status: "active" as ResourceStatus, meta: {}
+            }
+        },
+        style: { width: section.width, height: section.height, zIndex: -2 },
+        draggable: false,
+    }));
+
+    const elements: FlowNode[] = data.nodes.map(node => {
+        const layoutPos = posMap.get(node.id);
+        return {
+            id: node.id,
+            type: "custom",
+            position: { x: layoutPos?.x ?? 0, y: layoutPos?.y ?? 0 },
+            data: { node, selected: node.id === selectedNodeId },
+            draggable: true,
         };
+    });
 
-        // Assign levels
-        const levelGroups: Record<number, InfraNode[]> = {};
-        for (const node of data.nodes) {
-            const l = catLevel[node.type] ?? 5;
-            if (!levelGroups[l]) levelGroups[l] = [];
-            levelGroups[l].push(node);
-        }
-
-        // Position nodes
-        Object.entries(levelGroups).forEach(([levelStr, levelNodes]) => {
-            const level = parseInt(levelStr);
-            const y = level * 150;
-            const width = levelNodes.length * 150;
-            const startX = -(width / 2);
-
-            levelNodes.forEach((node, i) => {
-                fNodes.push({
-                    id: node.id,
-                    type: "custom",
-                    position: { x: startX + (i * 150), y },
-                    data: { node, selected: node.id === selectedNodeId }
-                });
-            });
+    // Determine active edges/nodes for hover highlighting
+    const activeEdgeIds = new Set<string>();
+    const activeNodeIds = new Set<string>();
+    if (hoveredNodeId) {
+        activeNodeIds.add(hoveredNodeId);
+        data.edges.forEach(edge => {
+            if (edge.source === hoveredNodeId || edge.target === hoveredNodeId) {
+                activeEdgeIds.add(`${edge.source}-${edge.target}`);
+                activeNodeIds.add(edge.source);
+                activeNodeIds.add(edge.target);
+            }
         });
+    }
+    if (hoveredEdgeId) activeEdgeIds.add(hoveredEdgeId);
 
-        // Map edges
-        for (const edge of data.edges) {
-            fEdges.push({
-                id: `${edge.source}-${edge.target}`,
-                source: edge.source,
-                target: edge.target,
-                label: edge.label,
-                animated: true,
-                type: "smoothstep",
-                style: { stroke: "#52525b", strokeWidth: 1.5 },
-                labelStyle: { fill: "#a1a1aa", fontSize: 9, fontWeight: 700 },
-                labelBgStyle: { fill: "#18181b", color: "#fff", fillOpacity: 0.8 },
-                markerEnd: { type: MarkerType.ArrowClosed, color: "#52525b" }
+    const hasHoverContext = hoveredNodeId !== null || hoveredEdgeId !== null;
+
+    // Build edges with category-based colors and hover dimming
+    const fEdges: Edge[] = [];
+    data.edges.forEach(edge => {
+        if (edge.label === "contains" || edge.label === "in-subnet") return;
+
+        const edgeId = `${edge.source}-${edge.target}`;
+        const category = classifyEdge(edge.label);
+        const colors = EDGE_COLORS[category];
+        const isActive = activeEdgeIds.has(edgeId);
+        const isDimmed = hasHoverContext && !isActive;
+
+        const strokeColor = isDimmed ? `${colors.stroke}30` : colors.stroke;
+        const labelColor = isDimmed ? `${colors.label}40` : colors.label;
+        const strokeWidth = isActive ? 3.5 : (isDimmed ? 1.5 : 2.5);
+
+        fEdges.push({
+            id: edgeId,
+            source: edge.source,
+            target: edge.target,
+            label: (isActive || !hasHoverContext) ? edge.label : undefined,
+            type: 'smoothstep',
+            animated: isActive,
+            style: {
+                stroke: strokeColor,
+                strokeWidth,
+                transition: 'stroke 0.3s ease, stroke-width 0.3s ease, opacity 0.3s ease',
+                filter: isActive ? `drop-shadow(${colors.glow})` : undefined,
+                opacity: isDimmed ? 0.25 : 1,
+            },
+            labelStyle: { fill: labelColor, fontSize: 10, fontWeight: 700, letterSpacing: '0.05em' },
+            labelBgStyle: { fill: "#09090b", color: "#fff", fillOpacity: 0.95, borderRadius: 6 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: isDimmed ? `${colors.stroke}40` : colors.stroke, width: 16, height: 16 },
+            zIndex: isActive ? 100 : 0,
+        });
+    });
+
+    return { nodes: [...groups, ...elements], edges: fEdges };
+}
+
+function EdgeLegend() {
+    const items: { cat: EdgeCategory; label: string }[] = [
+        { cat: 'networking', label: 'Networking' },
+        { cat: 'traffic', label: 'Traffic' },
+        { cat: 'data', label: 'Data' },
+        { cat: 'security', label: 'Security' },
+        { cat: 'generic', label: 'Other' },
+    ];
+    return (
+        <div className="absolute bottom-3 right-3 z-10 bg-zinc-950/90 backdrop-blur-sm border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-3">
+            {items.map(({ cat, label }) => (
+                <div key={cat} className="flex items-center gap-1.5">
+                    <div className="w-5 h-[3px] rounded-full" style={{ backgroundColor: EDGE_COLORS[cat].stroke }} />
+                    <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: EDGE_COLORS[cat].label }}>{label}</span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function ArchitectureGraph({ data, selectedNodeId, onSelect }: { data: InfraMap; selectedNodeId: string | null; onSelect: (node: InfraNode) => void }) {
+    const { socket } = useSocket();
+    const [layoutPlan, setLayoutPlan] = React.useState<LayoutPlan | null>(null);
+    const [layoutLoading, setLayoutLoading] = React.useState(false);
+    const [layoutError, setLayoutError] = React.useState<string | null>(null);
+    const [hoveredNodeId, setHoveredNodeId] = React.useState<string | null>(null);
+    const [hoveredEdgeId, setHoveredEdgeId] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        if (!data) return;
+        setLayoutLoading(true);
+        setLayoutError(null);
+        if (socket) {
+            socket.emit("generate_graph_layout", { infraData: data }, (res: any) => {
+                setLayoutLoading(false);
+                if (res.status === "error") setLayoutError(res.message);
+                else setLayoutPlan(res.data);
             });
+        } else {
+            const fallbackNodes = data.nodes.map((n, i) => ({
+                id: n.id, x: 40 + (i % 6) * 220, y: 40 + Math.floor(i / 6) * 180, section: "All Resources"
+            }));
+            const totalRows = Math.ceil(data.nodes.length / 6);
+            setLayoutPlan({
+                nodes: fallbackNodes,
+                sections: [{ name: "All Resources", x: 0, y: 0, width: 1400, height: totalRows * 180 + 100 }],
+                isAIGenerated: false
+            });
+            setLayoutLoading(false);
         }
+    }, [data, socket]);
 
-        return { nodes: fNodes, edges: fEdges };
-    }, [data, selectedNodeId]);
+    const { nodes: flowNodes, edges: flowEdges } = useMemo(() => {
+        if (!layoutPlan) return { nodes: [], edges: [] };
+        return applyLayoutPlan(data, layoutPlan, selectedNodeId, hoveredNodeId, hoveredEdgeId);
+    }, [data, layoutPlan, selectedNodeId, hoveredNodeId, hoveredEdgeId]);
+
+    const onNodeMouseEnter = useCallback((_: any, node: FlowNode) => {
+        if (node.id && !node.id.startsWith('section-')) setHoveredNodeId(node.id);
+    }, []);
+    const onNodeMouseLeave = useCallback(() => setHoveredNodeId(null), []);
+    const onEdgeMouseEnter = useCallback((_: any, edge: Edge) => setHoveredEdgeId(edge.id), []);
+    const onEdgeMouseLeave = useCallback(() => setHoveredEdgeId(null), []);
+
+    if (layoutLoading) {
+        return (
+            <div className="w-full h-full bg-zinc-950/50 rounded-xl border border-zinc-800/50 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4 animate-pulse">
+                    <div className="relative">
+                        <Loader2 className="h-10 w-10 text-sky-400 animate-spin" />
+                        <div className="absolute inset-0 h-10 w-10 rounded-full bg-sky-500/20 animate-ping" />
+                    </div>
+                    <div className="text-sm font-mono text-sky-300 tracking-wider uppercase">🤖 AI is planning your layout...</div>
+                    <div className="text-[10px] text-zinc-500">Analyzing {data.nodes.length} resources and {data.edges.length} connections</div>
+                </div>
+            </div>
+        );
+    }
+
+    if (layoutError) {
+        return (
+            <div className="w-full h-full bg-zinc-950/50 rounded-xl border border-red-800/50 flex items-center justify-center">
+                <div className="text-center">
+                    <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-2" />
+                    <div className="text-sm text-red-300">Layout Error: {layoutError}</div>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="w-full h-full bg-zinc-950/50 rounded-xl border border-zinc-800/50 overflow-hidden">
+        <div className="w-full h-full bg-zinc-950/50 rounded-xl border border-zinc-800/50 overflow-hidden relative">
+            {layoutPlan && (
+                <div className="absolute top-3 right-3 z-10">
+                    <span className={cn(
+                        "text-[9px] font-mono uppercase tracking-widest px-2 py-1 rounded-full border",
+                        layoutPlan.isAIGenerated
+                            ? "text-emerald-400 bg-emerald-950/50 border-emerald-500/30"
+                            : "text-sky-400 bg-sky-950/50 border-sky-500/30"
+                    )}>
+                        {layoutPlan.isAIGenerated ? "🤖 AI Layout" : "📐 Auto Layout"}
+                    </span>
+                </div>
+            )}
+            <EdgeLegend />
             <ReactFlow
                 nodes={flowNodes}
                 edges={flowEdges}
                 nodeTypes={nodeTypes}
-                onNodeClick={(_, node) => onSelect(node.data.node)}
+                onNodeClick={(_, node) => { if (node.data?.node) onSelect(node.data.node); }}
+                onNodeMouseEnter={onNodeMouseEnter}
+                onNodeMouseLeave={onNodeMouseLeave}
+                onEdgeMouseEnter={onEdgeMouseEnter}
+                onEdgeMouseLeave={onEdgeMouseLeave}
                 fitView
                 className="w-full h-full"
-                minZoom={0.1}
+                minZoom={0.05}
                 maxZoom={1.5}
             >
                 <Background color="#27272a" gap={20} size={1} />
@@ -271,13 +470,46 @@ export function AwsArchitecture() {
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
     const [viewMode, setViewMode] = useState<"tree" | "graph">("tree");
+    const [selectedRegion, setSelectedRegion] = useState<string>("global");
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["networking", "compute", "storage", "load-balancing", "database", "security"]));
     const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
     const [selectedNode, setSelectedNode] = useState<InfraNode | null>(null);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
 
     const demo = useMemo(() => generateDemoInfra(), []);
-    const data = infraData || (isLive ? null : demo);
+    const rawData = infraData || (isLive ? null : demo);
+
+    // Extract unique regions from the dataset
+    const availableRegions = useMemo(() => {
+        if (!rawData) return [];
+        const regions = [...new Set(rawData.nodes.map(n => n.region))].filter(Boolean).sort();
+        return regions;
+    }, [rawData]);
+
+    // Filter data by selected region
+    const data = useMemo((): InfraMap | null => {
+        if (!rawData) return null;
+        if (selectedRegion === "global") return rawData;
+
+        const filteredNodes = rawData.nodes.filter(n => n.region === selectedRegion);
+        const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+        const filteredEdges = rawData.edges.filter(e => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
+
+        return {
+            nodes: filteredNodes,
+            edges: filteredEdges,
+            summary: {
+                totalResources: filteredNodes.length,
+                activeCount: filteredNodes.filter(n => n.status === "active").length,
+                stoppedCount: filteredNodes.filter(n => n.status === "stopped").length,
+                orphanCount: filteredNodes.filter(n => n.status === "orphan").length,
+                idleCount: filteredNodes.filter(n => n.status === "idle").length,
+                regionCount: 1,
+                serviceTypes: [...new Set(filteredNodes.map(n => n.type))],
+            },
+            fetchedAt: rawData.fetchedAt,
+        };
+    }, [rawData, selectedRegion]);
 
     // Fetch handler
     const handleFetch = useCallback(() => {
@@ -379,6 +611,23 @@ export function AwsArchitecture() {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    {/* Region Selector */}
+                    {rawData && (
+                        <div className="flex items-center gap-2">
+                            <Globe2 className="h-3.5 w-3.5 text-zinc-500" />
+                            <select
+                                value={selectedRegion}
+                                onChange={e => setSelectedRegion(e.target.value)}
+                                className="rounded-lg border border-zinc-800/50 bg-zinc-900/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300 outline-none focus:border-sky-500/50 cursor-pointer appearance-none pr-6"
+                                style={{ backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`, backgroundPosition: 'right 0.35rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.2em 1.2em' }}
+                            >
+                                <option value="global">🌐 Global (All Regions)</option>
+                                {availableRegions.filter(r => r !== 'global').map(region => (
+                                    <option key={region} value={region}>{region}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     {isLive && (
                         <button
                             onClick={handleFetch}

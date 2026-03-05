@@ -12,6 +12,7 @@ import dotenv from "dotenv";
 import { TelemetryService } from "./src/services/telemetryService";
 import { AlertingWorker } from "./src/services/alertingWorker";
 import { runAnalysis } from "./src/services/nimAnalystService";
+import { generateLayout } from "./src/services/nimLayoutService";
 import { AwsIntegrationService } from "./src/services/awsIntegrationService";
 import { PerRequestCredentials } from "./src/services/awsIntegrationService";
 import { getFullAccountInfrastructure } from "./src/services/awsInfrastructureEngine";
@@ -319,6 +320,18 @@ async function startServer() {
         callback({ status: "success", data: infraMap });
       } catch (err: any) {
         console.error("Infrastructure Scan Error:", err);
+        callback({ status: "error", message: err.message });
+      }
+    });
+
+    // ── AI-Assisted Graph Layout ──────────────────────────────────────────
+    socket.on("generate_graph_layout", async (data, callback) => {
+      try {
+        console.log("[LAYOUT] AI layout generation requested...");
+        const layoutPlan = await generateLayout(data.infraData);
+        callback({ status: "success", data: layoutPlan });
+      } catch (err: any) {
+        console.error("Layout Generation Error:", err);
         callback({ status: "error", message: err.message });
       }
     });
