@@ -8,7 +8,7 @@ import { useAppMode } from "../contexts/AppModeContext";
 
 type NavItemType = {
   name: string;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   path?: string;
   children?: NavItemType[];
 };
@@ -145,9 +145,11 @@ function NavItem({
   const location = useLocation();
   const isActive = item.path ? location.pathname === item.path : false;
 
+  const Icon = item.icon;
+
   const content = (
     <>
-      <item.icon className={cn("h-4 w-4 shrink-0", depth > 0 && "h-3.5 w-3.5", isActive && "text-zinc-100")} />
+      {Icon && <Icon className={cn("h-4 w-4 shrink-0", depth > 0 && "h-3.5 w-3.5", isActive && "text-zinc-100")} />}
 
       {isOpen && (
         <>

@@ -298,11 +298,11 @@ export function GlobalNodes() {
     );
 }
 
-function MiniKPI({ icon: Icon, label, value, color = "text-zinc-100" }: { icon: React.ElementType; label: string; value: string; color?: string }) {
+function MiniKPI({ icon: Icon, label, value, color = "text-zinc-100" }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; color?: string }) {
     return (
         <div className="rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-3">
             <div className="flex items-center gap-1.5 text-zinc-500">
-                <Icon className="h-3 w-3" />
+                {Icon && <Icon className="h-3 w-3" />}
                 <span className="text-[10px] uppercase tracking-widest">{label}</span>
             </div>
             <div className={cn("text-xl font-mono font-bold mt-1", color)}>{value}</div>

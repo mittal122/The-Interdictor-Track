@@ -273,7 +273,7 @@ export function StorageArrays() {
 }
 
 // --- Sub-components ---
-function KPI({ icon: Icon, label, value, status = "nominal" }: { icon: React.ElementType; label: string; value: string; status?: string }) {
+function KPI({ icon: Icon, label, value, status = "nominal" }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; status?: string }) {
     return (
         <div className={cn(
             "rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-3",
@@ -281,7 +281,7 @@ function KPI({ icon: Icon, label, value, status = "nominal" }: { icon: React.Ele
             status === "warning" && "border-yellow-900/30",
         )}>
             <div className="flex items-center gap-2 text-zinc-500">
-                <Icon className="h-3.5 w-3.5" />
+                {Icon && <Icon className="h-3.5 w-3.5" />}
                 <span className="text-[10px] uppercase tracking-widest">{label}</span>
             </div>
             <div className={cn(

@@ -15,6 +15,8 @@ import { runAnalysis } from "./src/services/nimAnalystService";
 import { generateLayout } from "./src/services/nimLayoutService";
 import { estimateCosts } from "./src/services/costEstimationService";
 import { generateTerraform } from "./src/services/terraformExportService";
+import { analyzeInfrastructure } from './src/services/aiAnalystService';
+import { getCachedInsights, setCachedInsights } from './src/services/aiInsightsCache';
 import { AwsIntegrationService } from "./src/services/awsIntegrationService";
 import { PerRequestCredentials } from "./src/services/awsIntegrationService";
 import { getFullAccountInfrastructure } from "./src/services/awsInfrastructureEngine";
@@ -395,6 +397,39 @@ async function startServer() {
       } catch (err: any) {
         console.error("Resource Deletion Error:", err);
         callback({ status: "error", message: `Delete Failed: ${err.message}` });
+      }
+    });
+
+    // ── AI Infrastructure Analyst ─────────────────────────────────────────
+    socket.on('analyze_infrastructure_ai', async (data) => {
+      try {
+        if (!data || !data.infraMap || !data.region) {
+          socket.emit('error', { message: 'Missing infrastructure data or region' });
+          return;
+        }
+
+        // Using region as part of cache key to isolate accounts/environments
+        const cacheKey = `ai_analysis_${data.accountId || 'default'}_${data.region}`;
+        const cached = getCachedInsights(cacheKey);
+
+        if (cached) {
+          console.log(`[AI Analyst] Returning cached insights for ${cacheKey}`);
+          socket.emit('analyze_infrastructure_ai_result', { insights: cached, source: 'cache' });
+          return;
+        }
+
+        console.log(`[AI Analyst] Generating new insights for ${cacheKey}...`);
+        const insights = await analyzeInfrastructure(data.infraMap);
+
+        if (insights && insights.length > 0) {
+          setCachedInsights(cacheKey, insights);
+        }
+
+        socket.emit('analyze_infrastructure_ai_result', { insights, source: 'ai' });
+
+      } catch (error: any) {
+        console.error('[AI Analyst] Error:', error);
+        socket.emit('error', { message: 'Failed to complete AI infrastructure analysis', details: error.message });
       }
     });
 

@@ -39,7 +39,7 @@ function generateDemoData() {
 
 // ── Status Badge ───────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
-    const map: Record<string, { color: string; icon: React.ElementType }> = {
+    const map: Record<string, { color: string; icon: React.ComponentType<{ className?: string }> }> = {
         running: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", icon: CheckCircle2 },
         stopped: { color: "text-zinc-500 bg-zinc-500/10 border-zinc-600/30", icon: XCircle },
         pending: { color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30", icon: Loader2 },
@@ -51,7 +51,7 @@ function StatusBadge({ status }: { status: string }) {
     const Icon = cfg.icon;
     return (
         <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider", cfg.color)}>
-            <Icon className={cn("h-3 w-3", (status === "pending" || status === "stopping") && "animate-spin")} />
+            {Icon && <Icon className={cn("h-3 w-3", (status === "pending" || status === "stopping") && "animate-spin")} />}
             {status}
         </span>
     );
@@ -273,11 +273,11 @@ export function AwsOverview() {
 }
 
 // ── Summary Card Component ─────────────────────────────────────────────────
-function SummaryCard({ label, value, icon: Icon, color }: { label: string; value: string; icon: React.ElementType; color: string }) {
+function SummaryCard({ label, value, icon: Icon, color }: { label: string; value: string; icon: React.ComponentType<{ className?: string }>; color: string }) {
     return (
         <div className="rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4 flex items-center gap-3">
             <div className={cn("rounded-lg bg-zinc-800/50 p-2", color)}>
-                <Icon className="h-5 w-5" />
+                {Icon && <Icon className="h-5 w-5" />}
             </div>
             <div>
                 <p className="text-2xl font-bold text-zinc-100 font-mono">{value}</p>

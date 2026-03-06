@@ -3,7 +3,7 @@ import {
     Cloud, Server, HardDrive, Globe2, Network, Shield, Radio, Zap, Database,
     Play, Square, Trash2, Loader2, ChevronDown, ChevronRight, AlertTriangle,
     CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers, GitMerge, Lock,
-    DollarSign, FileCode, Box, Maximize, Minimize
+    DollarSign, FileCode, Box, Maximize, Minimize, Sparkles
 } from "lucide-react";
 import ReactFlow, { Background, Controls, MarkerType, NodeProps, Handle, Position, Edge, Node as FlowNode } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -13,6 +13,9 @@ import { useAppMode } from "../contexts/AppModeContext";
 import { Isometric3DView } from "../components/Isometric3DView";
 import { CostEstimationPanel } from "../components/CostEstimationPanel";
 import { TerraformExportModal } from "../components/TerraformExportModal";
+import { AiInsightsPanel } from "../components/AiInsightsPanel";
+import { AiInsight } from "../utils/insightDeduplicator";
+import { filterInfrastructureByVpc } from "../utils/vpcInfrastructureFilter";
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const API_COST_MAP: Record<string, string> = {
@@ -36,6 +39,7 @@ interface InfraMap {
     nodes: InfraNode[]; edges: InfraEdge[];
     summary: { totalResources: number; activeCount: number; stoppedCount: number; orphanCount: number; idleCount: number; regionCount: number; serviceTypes: string[]; };
     fetchedAt: number;
+    liveAccountId?: string;
 }
 
 // ── Demo Data ─────────────────────────────────────────────────────────────
@@ -126,7 +130,7 @@ function generateDemoInfra(): InfraMap {
 }
 
 // ── Icon Map ──────────────────────────────────────────────────────────────
-const TYPE_ICON: Record<string, React.ElementType> = {
+const TYPE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
     vpc: Globe2, subnet: Layers, igw: Radio, nat: Radio, "route-table": Network,
     sg: Shield, ec2: Server, ebs: HardDrive, eip: CircleDot,
     elb: Zap, "target-group": Zap, lambda: Zap, s3: Database,
@@ -140,7 +144,7 @@ const TYPE_LABEL: Record<string, string> = {
 const CATEGORY_LABEL: Record<string, string> = {
     networking: "Networking", compute: "Compute", storage: "Storage", "load-balancing": "Load Balancing",
 };
-const STATUS_CONFIG: Record<string, { color: string; bg: string; border: string; icon: React.ElementType; label: string }> = {
+const STATUS_CONFIG: Record<string, { color: string; bg: string; border: string; icon: React.ComponentType<{ className?: string }>; label: string }> = {
     active: { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30", icon: CheckCircle2, label: "Active" },
     stopped: { color: "text-zinc-500", bg: "bg-zinc-500/10", border: "border-zinc-600/30", icon: XCircle, label: "Stopped" },
     idle: { color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/30", icon: CircleDot, label: "Idle" },
@@ -154,7 +158,7 @@ function StatusBadge({ status }: { status: ResourceStatus }) {
     const Icon = cfg.icon;
     return (
         <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest", cfg.color, cfg.bg, cfg.border)}>
-            <Icon className={cn("h-2.5 w-2.5", status === "pending" && "animate-spin")} />
+            {Icon && <Icon className={cn("h-2.5 w-2.5", status === "pending" && "animate-spin")} />}
             {cfg.label}
         </span>
     );
@@ -190,7 +194,7 @@ function CustomNode({ data }: NodeProps) {
 
             <div className="flex flex-col items-center gap-2 w-full">
                 <div className={cn("p-2 rounded-lg", theme.iconBg)}>
-                    <Icon className={cn("h-6 w-6", theme.text)} />
+                    {Icon && typeof Icon !== 'string' ? <Icon className={cn("h-6 w-6", theme.text)} /> : <Boxes className={cn("h-6 w-6", theme.text)} />}
                 </div>
                 <div className="text-[11px] font-bold text-zinc-100 text-center leading-tight truncate w-full px-1" title={data.node.name}>
                     {data.node.name}
@@ -465,7 +469,7 @@ function ArchitectureGraph({ data, selectedNodeId, onSelect }: { data: InfraMap;
                 minZoom={0.05}
                 maxZoom={1.5}
             >
-                <Background color="#27272a" gap={20} size={1} />
+
                 <Controls className="!bg-zinc-900 border !border-zinc-800 !fill-zinc-400" />
             </ReactFlow>
         </div>
@@ -476,18 +480,25 @@ function ArchitectureGraph({ data, selectedNodeId, onSelect }: { data: InfraMap;
 export function AwsArchitecture() {
     const { socket, connectionState } = useSocket();
     const { mode } = useAppMode();
-    const isLive = mode === "live" && connectionState === "live";
 
     const [infraData, setInfraData] = useState<InfraMap | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
-    const [viewMode, setViewMode] = useState<"tree" | "graph" | "3d">("tree");
     const [selectedRegion, setSelectedRegion] = useState<string>("global");
-    const [showCostPanel, setShowCostPanel] = useState(false);
-    const [showTfExport, setShowTfExport] = useState(false);
+    const [selectedVpc, setSelectedVpc] = useState<string>("all");
+    // View States
+    const [viewMode, setViewMode] = useState<"tree" | "graph" | "3d">("tree");
     const [isFullscreen, setIsFullscreen] = useState(false);
     const containerRef = React.useRef<HTMLDivElement>(null);
+    const [showCostPanel, setShowCostPanel] = useState(false);
+    const [showTfExport, setShowTfExport] = useState(false);
+
+    const [showAiInsights, setShowAiInsights] = useState(false);
+    const [aiInsights, setAiInsights] = useState<AiInsight[]>([]);
+    const [aiInsightsLoading, setAiInsightsLoading] = useState(false);
+
+    const isLive = !!infraData?.liveAccountId; // Changed definition of isLive
 
     // Fullscreen listener
     React.useEffect(() => {
@@ -525,30 +536,50 @@ export function AwsArchitecture() {
         return regions;
     }, [rawData]);
 
-    // Filter data by selected region
+    // Extract available VPCs from the region-filtered data
+    const availableVpcs = useMemo(() => {
+        if (!rawData) return [];
+        let nodes = rawData.nodes;
+        if (selectedRegion !== "global") {
+            nodes = nodes.filter(n => n.region === selectedRegion);
+        }
+        const vpcs = nodes.filter(n => n.category === "networking" && n.type === "vpc");
+        return vpcs.map(v => ({ id: v.id, name: v.name || v.id })).sort((a, b) => a.name.localeCompare(b.name));
+    }, [rawData, selectedRegion]);
+
+    // Filter data by selected region and VPC
     const data = useMemo((): InfraMap | null => {
         if (!rawData) return null;
-        if (selectedRegion === "global") return rawData;
+        let filteredMap = rawData;
 
-        const filteredNodes = rawData.nodes.filter(n => n.region === selectedRegion);
-        const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
-        const filteredEdges = rawData.edges.filter(e => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
+        if (selectedRegion !== "global") {
+            const filteredNodes = rawData.nodes.filter(n => n.region === selectedRegion);
+            const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+            const filteredEdges = rawData.edges.filter(e => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
 
-        return {
-            nodes: filteredNodes,
-            edges: filteredEdges,
-            summary: {
-                totalResources: filteredNodes.length,
-                activeCount: filteredNodes.filter(n => n.status === "active").length,
-                stoppedCount: filteredNodes.filter(n => n.status === "stopped").length,
-                orphanCount: filteredNodes.filter(n => n.status === "orphan").length,
-                idleCount: filteredNodes.filter(n => n.status === "idle").length,
-                regionCount: 1,
-                serviceTypes: [...new Set(filteredNodes.map(n => n.type))],
-            },
-            fetchedAt: rawData.fetchedAt,
-        };
-    }, [rawData, selectedRegion]);
+            filteredMap = {
+                ...rawData,
+                nodes: filteredNodes,
+                edges: filteredEdges,
+                summary: {
+                    ...rawData.summary,
+                    totalResources: filteredNodes.length,
+                    activeCount: filteredNodes.filter(n => n.status === "active").length,
+                    stoppedCount: filteredNodes.filter(n => n.status === "stopped").length,
+                    orphanCount: filteredNodes.filter(n => n.status === "orphan").length,
+                    idleCount: filteredNodes.filter(n => n.status === "idle").length,
+                    regionCount: 1,
+                    serviceTypes: [...new Set(filteredNodes.map(n => n.type))],
+                }
+            };
+        }
+
+        if (selectedVpc !== "all") {
+            filteredMap = filterInfrastructureByVpc(filteredMap, selectedVpc) || filteredMap;
+        }
+
+        return filteredMap;
+    }, [rawData, selectedRegion, selectedVpc]);
 
     // Fetch handler
     const handleFetch = useCallback(() => {
@@ -564,6 +595,43 @@ export function AwsArchitecture() {
             }
         });
     }, [socket, isLive]);
+
+    const handleFetchAiInsights = () => {
+        if (!data) return;
+        setShowAiInsights(true);
+        setAiInsightsLoading(true);
+        // Request AI analysis via socket
+        socket?.emit('analyze_infrastructure_ai', {
+            infraMap: data,
+            accountId: data.liveAccountId,
+            region: selectedRegion === 'global' ? data.nodes[0]?.region || 'us-east-1' : selectedRegion
+        });
+    };
+
+    // Socket listeners
+    React.useEffect(() => {
+        if (!socket) return;
+
+        socket.on("aws_infrastructure_update", (data) => {
+            setInfraData(data);
+        });
+
+        socket.on("error", (error) => {
+            setError(error.message);
+            setAiInsightsLoading(false);
+        });
+
+        socket.on("analyze_infrastructure_ai_result", (result) => {
+            setAiInsights(result.insights || []);
+            setAiInsightsLoading(false);
+        });
+
+        return () => {
+            socket.off("aws_infrastructure_update");
+            socket.off("error");
+            socket.off("analyze_infrastructure_ai_result");
+        };
+    }, [socket]);
 
     // EC2 lifecycle
     const handleAction = (action: "start" | "stop", nodeId: string, instanceId: string, region: string) => {
@@ -662,13 +730,30 @@ export function AwsArchitecture() {
                             <Globe2 className="h-3.5 w-3.5 text-zinc-500" />
                             <select
                                 value={selectedRegion}
-                                onChange={e => setSelectedRegion(e.target.value)}
+                                onChange={e => {
+                                    setSelectedRegion(e.target.value);
+                                    setSelectedVpc("all"); // Reset VPC when region changes
+                                }}
                                 className="rounded-lg border border-zinc-800/50 bg-zinc-900/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300 outline-none focus:border-sky-500/50 cursor-pointer appearance-none pr-6"
                                 style={{ backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`, backgroundPosition: 'right 0.35rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.2em 1.2em' }}
                             >
                                 <option value="global">🌐 Global (All Regions)</option>
                                 {availableRegions.filter(r => r !== 'global').map(region => (
                                     <option key={region} value={region}>{region}</option>
+                                ))}
+                            </select>
+
+                            {/* VPC Selector */}
+                            <Network className="h-3.5 w-3.5 text-zinc-500 ml-2" />
+                            <select
+                                value={selectedVpc}
+                                onChange={e => setSelectedVpc(e.target.value)}
+                                className="rounded-lg border border-zinc-800/50 bg-zinc-900/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300 outline-none focus:border-purple-500/50 cursor-pointer appearance-none pr-6 max-w-[200px] truncate"
+                                style={{ backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`, backgroundPosition: 'right 0.35rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.2em 1.2em' }}
+                            >
+                                <option value="all">All VPCs</option>
+                                {availableVpcs.map(vpc => (
+                                    <option key={vpc.id} value={vpc.id}>{vpc.name} ({vpc.id})</option>
                                 ))}
                             </select>
                         </div>
@@ -715,6 +800,21 @@ export function AwsArchitecture() {
                                 <span>Terraform</span>
                                 <span className="ml-1 text-[8px] px-1 py-0.5 rounded bg-zinc-700 text-zinc-400 group-hover:bg-violet-950 group-hover:text-violet-300">
                                     {API_COST_MAP.terraform_export}
+                                </span>
+                            </button>
+                            <button
+                                onClick={handleFetchAiInsights}
+                                title="This action calls AWS APIs which may incur small usage charges depending on your AWS account."
+                                className={cn("inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-bold uppercase tracking-wider transition group relative",
+                                    showAiInsights
+                                        ? "border-violet-500/40 bg-violet-500/20 text-violet-400"
+                                        : "border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-violet-400 hover:border-violet-500/30"
+                                )}
+                            >
+                                <Sparkles className="h-3 w-3" />
+                                <span>AI Analyst</span>
+                                <span className={cn("ml-1 text-[8px] px-1 py-0.5 rounded", showAiInsights ? "bg-violet-950/60 text-violet-300" : "bg-zinc-700 text-zinc-400 group-hover:bg-violet-950 group-hover:text-violet-300")}>
+                                    $0.005
                                 </span>
                             </button>
                         </>
@@ -786,7 +886,15 @@ export function AwsArchitecture() {
                             </button>
                         </div>
 
-                        {viewMode === "tree" ? (
+                        {data.nodes.length === 0 ? (
+                            <div className={cn("rounded-xl border border-dashed border-zinc-800/80 bg-zinc-900/20 p-8 flex flex-col items-center justify-center text-center", isFullscreen ? "flex-1" : "h-full min-h-[400px]")}>
+                                <Network className="h-12 w-12 text-zinc-600 mb-4" />
+                                <h3 className="text-lg font-semibold text-zinc-300">No resources found</h3>
+                                <p className="text-zinc-500 mt-2 max-w-sm">
+                                    The selected VPC does not contain any discovered resources in the current region.
+                                </p>
+                            </div>
+                        ) : viewMode === "tree" ? (
                             <div className={cn("rounded-xl border border-zinc-800/50 bg-zinc-900/20 p-4 overflow-y-auto", isFullscreen ? "flex-1" : "h-full max-h-[70vh]")}>
                                 <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4 flex items-center gap-2">
                                     <Boxes className="h-3.5 w-3.5" /> Hierarchical Resource View
@@ -982,6 +1090,30 @@ export function AwsArchitecture() {
             {/* Terraform Export Modal */}
             {data && showTfExport && (
                 <TerraformExportModal infraData={data} onClose={() => setShowTfExport(false)} />
+            )}
+
+            {/* AI Insights Panel */}
+            {data && showAiInsights && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm shadow-2xl">
+                    <div className="w-full max-w-4xl max-h-[90vh] flex flex-col">
+                        <AiInsightsPanel
+                            insights={aiInsights}
+                            loading={aiInsightsLoading}
+                            onClose={() => setShowAiInsights(false)}
+                            onInsightClick={(insight) => {
+                                // If affected resources exist, highlight the first one in the graph/tree
+                                if (insight.affectedResources && insight.affectedResources.length > 0) {
+                                    const targetNode = data.nodes.find(n => n.id === insight.affectedResources[0] || (n as any).instanceId === insight.affectedResources[0]);
+                                    if (targetNode) {
+                                        setSelectedNode(targetNode);
+                                        if (viewMode === '3d') setViewMode('graph'); // Bring to 2D for easier selection view
+                                        setShowAiInsights(false); // Close panel to show graph
+                                    }
+                                }
+                            }}
+                        />
+                    </div>
+                </div>
             )}
 
             {/* Empty state for live mode */}
