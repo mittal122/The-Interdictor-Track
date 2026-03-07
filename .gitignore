@@ -4,3 +4,6 @@ interdictor.db
 certs/
 *.pem
 .env
+tsc_errors.txt
+ts_cost_err.txt
+ct_out.txt

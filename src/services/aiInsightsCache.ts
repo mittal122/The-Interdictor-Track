@@ -27,3 +27,11 @@ export function setCachedInsights(key: string, insights: AiInsight[]): void {
         insights
     });
 }
+
+// Evict expired entries every 10 minutes to prevent unbounded memory growth
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of insightCache) {
+        if (now - entry.timestamp > CACHE_TTL_MS) insightCache.delete(key);
+    }
+}, 10 * 60 * 1000);

@@ -64,31 +64,62 @@ let infraCache: { data: InfraMap; timestamp: number; key: string } | null = null
 const CACHE_TTL = 60_000; // 60 seconds
 
 // ── Credential resolution (reuse from main service) ───────────────────────
-function resolveCredentials(perRequest?: PerRequestCredentials | null) {
+import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
+
+// ── Credential resolution (reuse from main service) ───────────────────────
+async function resolveCredentials(perRequest?: PerRequestCredentials | null) {
     const SERVER_KEY = process.env.AWS_ACCESS_KEY_ID;
     const SERVER_SECRET = process.env.AWS_SECRET_ACCESS_KEY;
     const SERVER_REGION = process.env.AWS_REGION || "us-east-1";
+    const TARGET_ROLE_ARN = process.env.AWS_ASSUME_ROLE_ARN; // Optional restricted scan role
+
+    let baseCreds = null;
+    let region = SERVER_REGION;
 
     if (perRequest?.awsAccessKeyId && perRequest?.awsSecretKey) {
-        return {
-            credentials: { accessKeyId: perRequest.awsAccessKeyId, secretAccessKey: perRequest.awsSecretKey },
-            region: perRequest.awsRegion || SERVER_REGION,
-        };
+        baseCreds = { accessKeyId: perRequest.awsAccessKeyId, secretAccessKey: perRequest.awsSecretKey };
+        region = perRequest.awsRegion || SERVER_REGION;
+    } else if (SERVER_KEY && SERVER_SECRET) {
+        baseCreds = { accessKeyId: SERVER_KEY, secretAccessKey: SERVER_SECRET };
     }
-    if (SERVER_KEY && SERVER_SECRET) {
-        return {
-            credentials: { accessKeyId: SERVER_KEY, secretAccessKey: SERVER_SECRET },
-            region: SERVER_REGION,
-        };
+
+    if (!baseCreds) return null;
+
+    // Optional: If a Role ARN is provided, assume it to get temporary least-privilege credentials
+    if (TARGET_ROLE_ARN) {
+        try {
+            console.log(`[STS] Assuming restricted role: ${TARGET_ROLE_ARN}`);
+            const sts = new STSClient({ region, credentials: baseCreds });
+            const response = await sts.send(new AssumeRoleCommand({
+                RoleArn: TARGET_ROLE_ARN,
+                RoleSessionName: `Interdictor-ScanSession-${Date.now()}`
+            }));
+
+            if (response.Credentials?.AccessKeyId && response.Credentials?.SecretAccessKey) {
+                return {
+                    credentials: {
+                        accessKeyId: response.Credentials.AccessKeyId,
+                        secretAccessKey: response.Credentials.SecretAccessKey,
+                        sessionToken: response.Credentials.SessionToken
+                    },
+                    region
+                };
+            }
+        } catch (error: any) {
+            console.error(`[STS] Failed to assume role:`, error.message);
+            // Fall back or fail depending on strictness. Here we fail safe.
+            throw new Error("Failed to assume restricted IAM role. Check trust policies.");
+        }
     }
-    return null;
+
+    return { credentials: baseCreds, region };
 }
 
 // ── Main Entry Point ──────────────────────────────────────────────────────
 export async function getFullAccountInfrastructure(
     perRequest?: PerRequestCredentials | null
 ): Promise<InfraMap | null> {
-    const resolved = resolveCredentials(perRequest);
+    const resolved = await resolveCredentials(perRequest);
     if (!resolved) return null;
 
     // Cache check

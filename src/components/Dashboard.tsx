@@ -10,7 +10,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 import { useAppMode } from "../contexts/AppModeContext";
 
-export function Dashboard({ telemetry: _propTelemetry }: { telemetry: any }) {
+export function Dashboard() {
   const { telemetry, socket } = useSocket();
   const { user } = useAuth();
   const { selectedRegion } = useAppMode();

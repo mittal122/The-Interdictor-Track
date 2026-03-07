@@ -3,6 +3,7 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { LiveModeWizard } from '../components/LiveModeWizard';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 
@@ -33,7 +34,9 @@ export function DashboardLayout() {
               </div>
             </div>
           ) : (
-            <Outlet />
+            <ErrorBoundary fallbackTitle="Page Error">
+              <Outlet />
+            </ErrorBoundary>
           )}
         </main>
       </div>

@@ -36,7 +36,7 @@ export function generateInfrastructureSummary(data: InfraMap): InfrastructureSum
     };
 
     // Extract key relationships
-    const relationMap = new Map<string, string[]>(); // e.g. "EC2 -> RDS": ["vpc-123", ...]
+    const relationMap = new Map<string, number>();
 
     // Find interesting edges
     for (const edge of data.edges) {
@@ -47,8 +47,7 @@ export function generateInfrastructureSummary(data: InfraMap): InfrastructureSum
             // We specifically want to highlight core operational relationships rather than generic containment
             if (['EC2', 'RDS', 'ELB', 'S3', 'LAMBDA'].includes(sourceNode.type.toUpperCase()) ||
                 ['EC2', 'RDS', 'ELB', 'S3', 'LAMBDA'].includes(targetNode.type.toUpperCase())) {
-                const existing = relationMap.get(relKey) || 0;
-                relationMap.set(relKey, (existing as number) + 1 as any);
+                relationMap.set(relKey, (relationMap.get(relKey) || 0) + 1);
             }
         }
     }

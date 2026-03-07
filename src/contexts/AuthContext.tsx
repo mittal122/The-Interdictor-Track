@@ -20,6 +20,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const { clearCredentials } = useCredentials();
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -45,7 +46,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('user');
     // Clear transient cloud credentials and revert to safe Demo Mode
     try {
-      const { clearCredentials } = useCredentials();
       clearCredentials();
     } catch { } // CredentialsContext may not be mounted during early teardown
   };

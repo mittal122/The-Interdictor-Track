@@ -28,7 +28,7 @@ export default function App() {
                 <Route path="/login" element={<Login />} />
                 <Route path="/" element={<DashboardLayout />}>
                   <Route index element={<Navigate to="/dashboard" replace />} />
-                  <Route path="dashboard" element={<Dashboard telemetry={null} />} />
+                  <Route path="dashboard" element={<Dashboard />} />
                   <Route path="aws-overview" element={<AwsOverview />} />
                   <Route path="aws-architecture" element={<AwsArchitecture />} />
                   <Route path="aws-unused" element={<AwsUnusedResources />} />

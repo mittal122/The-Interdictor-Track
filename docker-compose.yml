@@ -5,7 +5,7 @@ services:
     image: prom/prometheus:latest
     container_name: interdictor-prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     restart: unless-stopped
@@ -18,7 +18,7 @@ services:
       POSTGRES_PASSWORD: interdictor
       POSTGRES_DB: interdictor_db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped

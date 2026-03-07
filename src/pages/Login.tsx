@@ -86,12 +86,14 @@ export function Login() {
             Authenticate
           </button>
         </form>
-        
-        <div className="mt-6 text-center text-[10px] text-zinc-600 uppercase tracking-widest">
-          <p>Demo Credentials:</p>
-          <p>Admin: admin / admin</p>
-          <p>Viewer: viewer / viewer</p>
-        </div>
+
+        {import.meta.env.DEV && (
+          <div className="mt-6 text-center text-[10px] text-zinc-600 uppercase tracking-widest">
+            <p>Demo Credentials:</p>
+            <p>Admin: admin / admin</p>
+            <p>Viewer: viewer / viewer</p>
+          </div>
+        )}
       </div>
     </div>
   );

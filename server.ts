@@ -7,7 +7,8 @@ import path from "path";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
-import { exec } from "child_process";
+import { execFile } from "child_process";
+import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import { TelemetryService } from "./src/services/telemetryService";
 import { AlertingWorker } from "./src/services/alertingWorker";
@@ -46,10 +47,39 @@ async function startServer() {
     console.log('⚠️  HTTP mode: No SSL certs found. Run scripts/generate-certs.ps1 to enable HTTPS.');
   }
 
-  const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
+  const ALLOWED_ORIGIN = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGIN, methods: ["GET", "POST"] } });
   const PORT = parseInt(process.env.PORT || '3000');
 
   app.use(express.json());
+
+  // ── Health & Readiness Endpoints ──────────────────────────────────────────
+  const serverStartTime = Date.now();
+
+  app.get("/health", async (_req, res) => {
+    let dbStatus = "disconnected";
+    try {
+      await pool.query("SELECT 1");
+      dbStatus = "connected";
+    } catch { dbStatus = "error"; }
+
+    res.json({
+      status: dbStatus === "connected" ? "healthy" : "degraded",
+      uptime: Math.floor((Date.now() - serverStartTime) / 1000),
+      database: dbStatus,
+      version: process.env.npm_package_version || "0.0.0",
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  app.get("/ready", async (_req, res) => {
+    try {
+      await pool.query("SELECT 1");
+      res.status(200).json({ status: "ready" });
+    } catch {
+      res.status(503).json({ status: "not ready", reason: "database unavailable" });
+    }
+  });
 
   // ── SECURITY: Credential Masking Middleware ───────────────────────────────
   // Registered AFTER the validate endpoint (see below) intentionally.
@@ -95,7 +125,8 @@ async function startServer() {
   });
 
   // ── Auth endpoint ─────────────────────────────────────────────────────────
-  app.post("/api/auth/login", async (req, res) => {
+  const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { message: "Too many login attempts. Try again in 1 minute." } });
+  app.post("/api/auth/login", loginLimiter, async (req, res) => {
     const { username, password } = req.body;
     try {
       const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
@@ -105,7 +136,7 @@ async function startServer() {
       const match = await bcrypt.compare(password, user.password);
       if (!match) return res.status(401).json({ message: "Invalid credentials" });
 
-      const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+      const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "2h" });
       return res.json({ token, user: { username: user.username, role: user.role } });
     } catch (err) {
       console.error("DB login error:", err);
@@ -197,7 +228,9 @@ async function startServer() {
           message: `SECURITY BLOCK: "${baseCommand}" is not whitelisted. Allowed: ${COMMAND_WHITELIST.join(', ')}`
         });
       }
-      exec(data.command, { timeout: 10000 }, (error, stdout, stderr) => {
+      // Use execFile instead of exec to avoid shell metacharacter injection
+      const args = trimmedCommand.split(/\s+/).slice(1);
+      execFile(baseCommand, args, { timeout: 10000 }, (error, stdout, stderr) => {
         if (error) return callback({ status: "error", message: stderr || error.message });
         callback({ status: "success", message: stdout || "Command executed silently." });
       });
@@ -444,6 +477,12 @@ async function startServer() {
   });
 
   // Vite middleware for development
+  // ── Prometheus metrics stub ──────────────────────────────────────────────
+  app.get("/metrics", (_req, res) => {
+    res.set("Content-Type", "text/plain");
+    res.send("# Interdictor Track metrics placeholder\ninterdictor_up 1\n");
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
@@ -452,7 +491,8 @@ async function startServer() {
   }
 
   const protocol = fs.existsSync(certPath) ? 'https' : 'http';
-  httpServer.listen(PORT, "0.0.0.0", () => {
+  const HOST = process.env.HOST || "127.0.0.1";
+  httpServer.listen(PORT, HOST, () => {
     console.log(`\n🟢 Interdictor Command Center`);
     console.log(`   Server: ${protocol}://localhost:${PORT}`);
     console.log(`   Mode:   Demo (frontend-gen) + Live (per-socket AWS)\n`);

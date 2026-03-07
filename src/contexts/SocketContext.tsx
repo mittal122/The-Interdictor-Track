@@ -93,7 +93,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           : null,
       },
       transports: ['websocket'],
-      rejectUnauthorized: false,
+      rejectUnauthorized: import.meta.env.PROD,
     });
 
     newSocket.on('connect', () => {
