@@ -19,18 +19,34 @@ const CredentialsContext = createContext<CredentialsContextType>({
 });
 
 /**
- * Stores cloud credentials in React state (transient memory only).
- * Credentials are NEVER persisted to localStorage or any browser storage.
+ * Stores cloud credentials in React state and optionally persists them
+ * to localStorage if the user chooses 'Remember Me'.
  */
 export function CredentialsProvider({ children }: { children: React.ReactNode }) {
-    const [credentials, setCredentialsState] = useState<CloudCredentials | null>(null);
+    const [credentials, setCredentialsState] = useState<CloudCredentials | null>(() => {
+        const stored = localStorage.getItem('cloudCredentials');
+        if (stored) {
+            try {
+                return JSON.parse(stored);
+            } catch (e) {
+                return null;
+            }
+        }
+        return null;
+    });
 
-    const setCredentials = (creds: CloudCredentials) => {
+    const setCredentials = (creds: CloudCredentials, rememberMe?: boolean) => {
         setCredentialsState(creds);
+        if (rememberMe) {
+            localStorage.setItem('cloudCredentials', JSON.stringify(creds));
+        } else {
+            localStorage.removeItem('cloudCredentials');
+        }
     };
 
     const clearCredentials = () => {
         setCredentialsState(null);
+        localStorage.removeItem('cloudCredentials');
     };
 
     return (
