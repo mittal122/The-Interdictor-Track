@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Why Was This Project Built?
+##   Why Was This Project Built?
 
 Modern cloud infrastructure is complex. DevOps engineers and system architects frequently spend hours manually logging into the AWS Console, clicking through 20+ different pages across multiple regions, just to understand:
 1. *What exactly is running right now?*
@@ -13,14 +13,14 @@ Modern cloud infrastructure is complex. DevOps engineers and system architects f
 
 Existing tools either produce unreadable "spaghetti diagrams" or require granting broad permissions to third-party services.
 
-## 🛑 The Problem It Solves
+##   The Problem It Solves
 
 - **The "Diagram Spaghetti" Problem:** Standard infrastructure graphs are often chaotic and unreadable due to overlapping lines.
 - **Cost Blind Spots:** Leftover load balancers, orphaned EBS volumes, and idle EC2 instances drain company budgets silently.
 - **Security Risks:** Simple misconfigurations, like an open Port 22 or a Single Point of Failure (SPOF), can lead to breaches or downtime.
 - **Manual Auditing & IaC:** Bringing a manually created cloud environment back into Terraform code is tedious and error-prone.
 
-## ✅ How It Solves It
+##   How It Solves It
 
 **The Interdictor Track** transforms raw, chaotic AWS telemetry into readable, intelligent diagrams and actionable insights:
 
@@ -32,7 +32,7 @@ Existing tools either produce unreadable "spaghetti diagrams" or require grantin
 
 ---
 
-## 🗺️ Visual Flow: How the Platform Works
+##   Visual Flow: How the Platform Works
 
 ```mermaid
 graph TD
@@ -60,11 +60,11 @@ graph TD
 
 ---
 
-## 🔒 Security First
+##   Security First
 
 All AWS Access Keys are encrypted using **AES-256-CBC** with a secure Vault Key and can be saved solely on the client side using secure local storage. Data passed to the AI models is strictly anonymized. 
 
-## 🚀 Run Locally
+##   Run Locally
 
 **Prerequisites:** Node.js
 
