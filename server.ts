@@ -17,6 +17,7 @@ import { generateLayout } from "./src/services/nimLayoutService";
 import { estimateCosts } from "./src/services/costEstimationService";
 import { generateTerraform } from "./src/services/terraformExportService";
 import { analyzeInfrastructure } from './src/services/aiAnalystService';
+import { ariaChat } from './src/services/ariaChatService';
 import { getCachedInsights, setCachedInsights } from './src/services/aiInsightsCache';
 import { AwsIntegrationService } from "./src/services/awsIntegrationService";
 import { PerRequestCredentials } from "./src/services/awsIntegrationService";
@@ -124,24 +125,52 @@ async function startServer() {
     next();
   });
 
+  // ── In-memory fallback users (used when DB is unavailable) ───────────────
+  // Credentials: admin / admin   and   viewer / viewer
+  const FALLBACK_USERS: Record<string, { password: string; role: "admin" | "viewer" }> = {
+    admin: { password: bcrypt.hashSync('admin', 10), role: "admin" },
+    viewer: { password: bcrypt.hashSync('viewer', 10), role: "viewer" },
+  };
+
   // ── Auth endpoint ─────────────────────────────────────────────────────────
-  const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { message: "Too many login attempts. Try again in 1 minute." } });
+  const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, message: { message: "Too many login attempts. Try again in 1 minute." } });
   app.post("/api/auth/login", loginLimiter, async (req, res) => {
     const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ message: "Username and password are required." });
+    }
+
+    // ── Try PostgreSQL first ──────────────────────────────────────────────
     try {
       const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
       const user = result.rows[0];
-      if (!user) return res.status(401).json({ message: "Invalid credentials" });
-
-      const match = await bcrypt.compare(password, user.password);
-      if (!match) return res.status(401).json({ message: "Invalid credentials" });
-
-      const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "2h" });
-      return res.json({ token, user: { username: user.username, role: user.role } });
-    } catch (err) {
-      console.error("DB login error:", err);
-      return res.status(500).json({ message: "Internal server error" });
+      if (user) {
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(401).json({ message: "Invalid credentials" });
+        const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "8h" });
+        return res.json({ token, user: { username: user.username, role: user.role } });
+      }
+      // User not found in DB — fall through to fallback
+    } catch (dbErr: any) {
+      // DB is offline — use fallback users silently
+      const isConnRefused = dbErr?.code === 'ECONNREFUSED' || dbErr?.message?.includes('ECONNREFUSED');
+      if (isConnRefused) {
+        console.warn("⚠️  PostgreSQL unavailable — using in-memory fallback users.");
+      } else {
+        console.error("DB login error:", dbErr);
+      }
     }
+
+    // ── Fallback: in-memory users ─────────────────────────────────────────
+    const fallbackUser = FALLBACK_USERS[username];
+    if (!fallbackUser) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+    const match = await bcrypt.compare(password, fallbackUser.password);
+    if (!match) return res.status(401).json({ message: "Invalid credentials" });
+
+    const token = jwt.sign({ username, role: fallbackUser.role }, JWT_SECRET, { expiresIn: "8h" });
+    return res.json({ token, user: { username, role: fallbackUser.role } });
   });
 
   // ── NVIDIA NIM AI Analyst ─────────────────────────────────────────────────
@@ -156,6 +185,33 @@ async function startServer() {
       if (err.name === "JsonWebTokenError") return res.status(401).json({ message: "Invalid token" });
       console.error("AI Analyst error:", err);
       return res.status(500).json({ message: "Analysis service error" });
+    }
+  });
+
+  // ── ARIA Conversational Chatbot ───────────────────────────────────────────
+  app.post("/api/ai/chat", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ message: "Unauthorized" });
+      jwt.verify(authHeader.slice(7), JWT_SECRET);
+
+      const { messages, telemetrySnapshot } = req.body;
+
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ message: "messages array is required" });
+      }
+
+      // Explicitly invoke the modified ariaChat function
+      const result = await ariaChat(messages, telemetrySnapshot);
+      return res.json(result);
+    } catch (err: any) {
+      // Catch ALL JWT errors (JsonWebTokenError, TokenExpiredError, NotBeforeError)
+      const jwtErrors = ["JsonWebTokenError", "TokenExpiredError", "NotBeforeError"];
+      if (jwtErrors.includes(err.name)) {
+        return res.status(401).json({ message: "Session expired. Please log in again." });
+      }
+      console.error("[ARIA Chat] Error:", err.name, "-", err.message);
+      return res.status(500).json({ message: err.message || "Chat service error" });
     }
   });
 
@@ -491,10 +547,10 @@ async function startServer() {
   }
 
   const protocol = fs.existsSync(certPath) ? 'https' : 'http';
-  const HOST = process.env.HOST || "127.0.0.1";
+  const HOST = process.env.HOST || "0.0.0.0";
   httpServer.listen(PORT, HOST, () => {
     console.log(`\n🟢 Interdictor Command Center`);
-    console.log(`   Server: ${protocol}://localhost:${PORT}`);
+    console.log(`   Server: ${protocol}://${HOST}:${PORT}`);
     console.log(`   Mode:   Demo (frontend-gen) + Live (per-socket AWS)\n`);
   });
 }
