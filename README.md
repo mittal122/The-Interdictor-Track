@@ -32,6 +32,33 @@ Existing tools either produce unreadable "spaghetti diagrams" or require grantin
 
 ---
 
+##   Technologies Used in This Project
+
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, React Router
+- **Backend:** Node.js, Express, Socket.IO, TypeScript
+- **Cloud & Infra:** AWS SDK v3 (EC2, ELB, S3, RDS, IAM, STS, Route53, CloudTrail, CloudWatch), Terraform (HCL export)
+- **AI Integrations:** NVIDIA NIM, Google Gemini
+- **Visualization:** React Flow, React Three Fiber + Three.js, Recharts, Leaflet
+- **Data & Auth:** PostgreSQL (`pg`), JWT Authentication, bcrypt password hashing
+- **Validation & Quality:** Zod schema validation, Vitest unit testing
+- **Deployment/Runtime:** Docker, Docker Compose
+
+##   Key Features Implemented (Resume-Ready)
+
+- Built a **multi-region AWS infrastructure discovery engine** that maps resources and dependencies into a live "Truth Map".
+- Implemented **real-time telemetry streaming** with Socket.IO, including personalized live sessions and demo mode fallback.
+- Developed **AI-assisted architecture layout planning** with deterministic fallback when AI key/config is unavailable.
+- Created an **interactive 3D isometric cloud architecture viewer** (networking → compute → data layers) using Three.js.
+- Built a **cost estimation and waste detection module** that identifies orphaned/idle resources and highlights potential monthly savings.
+- Implemented **AI infrastructure analyst workflows** to surface security, cost, architecture, and operational recommendations.
+- Added **reverse Terraform export** to generate `provider.tf`, `variables.tf`, `main.tf`, and `outputs.tf` from discovered infrastructure.
+- Designed **secure credential handling** with AES-256-CBC vault encryption, IAM least-privilege role assumption, and anonymized AI payloads.
+- Added **role-based access control (admin/viewer)** with JWT, route/event authorization checks, and rate-limited login endpoint.
+- Added **typed input validation** for critical socket/API flows using Zod to reduce unsafe payload handling.
+- Added **health/readiness endpoints** and resilient fallback behavior when dependencies (like DB) are unavailable.
+
+---
+
 ##   Visual Flow: How the Platform Works
 
 ```mermaid
