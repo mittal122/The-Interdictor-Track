@@ -94,6 +94,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       },
       transports: ['websocket'],
       rejectUnauthorized: import.meta.env.PROD,
+      // Limit reconnection attempts — on static deploys (Vercel) the server is unreachable
+      reconnectionAttempts: 3,
+      reconnectionDelay: 1000,
+      timeout: 5000,
     });
 
     newSocket.on('connect', () => {
@@ -101,16 +105,22 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on('connect_error', (err) => {
-      console.error('[LIVE] WebSocket connection failed:', err.message);
+      console.warn('[LIVE] WebSocket connection failed:', err.message);
       if (
         err.message.includes('Authentication error') ||
         err.message.includes('jwt expired') ||
         err.message.includes('Invalid token')
       ) {
         logout();
+        return;
       }
-      // If connection fails (e.g. backend down), fall back to demo generation
+      // If connection fails (e.g. backend down on Vercel), fall back to demo generation
+      setConnectionState('demo');
       setTelemetry(generateDemoTelemetry());
+      // Start local demo generation so dashboard stays alive
+      if (!demoIntervalRef.current) {
+        demoIntervalRef.current = setInterval(() => setTelemetry(generateDemoTelemetry()), 2000);
+      }
     });
 
     newSocket.on('telemetry_update', (data) => {

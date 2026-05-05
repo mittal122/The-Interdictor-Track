@@ -1,8 +1,9 @@
-﻿import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Brain, Send, Loader2, Sparkles, User, RotateCcw, Zap, MessageSquare, Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAuth } from "../contexts/AuthContext";
+import { useCredentials } from "../contexts/CredentialsContext";
 import { v4 as uuidv4 } from "uuid";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ function RenderContent({ text }: { text: string }) {
 export function AiAnalyst() {
     const { telemetry } = useSocket();
     const { token, logout } = useAuth();
+    const { credentials } = useCredentials();
 
     // Session State
     const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -253,6 +255,12 @@ export function AiAnalyst() {
                 body: JSON.stringify({
                     messages: apiMessages,
                     telemetrySnapshot: buildTelemetrySnapshot(),
+                    // Pass cloud credentials so the backend can fetch the full InfraMap
+                    cloudCredentials: credentials ? {
+                        awsAccessKeyId: credentials.awsAccessKeyId,
+                        awsSecretKey: credentials.awsSecretKey,
+                        awsRegion: credentials.awsRegion,
+                    } : null,
                 }),
             });
 

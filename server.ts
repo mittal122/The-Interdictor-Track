@@ -195,14 +195,28 @@ async function startServer() {
       if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ message: "Unauthorized" });
       jwt.verify(authHeader.slice(7), JWT_SECRET);
 
-      const { messages, telemetrySnapshot } = req.body;
+      const { messages, telemetrySnapshot, cloudCredentials } = req.body;
 
       if (!messages || !Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ message: "messages array is required" });
       }
 
-      // Explicitly invoke the modified ariaChat function
-      const result = await ariaChat(messages, telemetrySnapshot);
+      // Fetch the full infrastructure map for the user's AWS credentials.
+      // Uses the existing 60s in-memory cache, so repeat calls within a minute are free.
+      let infraMap = null;
+      if (cloudCredentials?.awsAccessKeyId && cloudCredentials?.awsSecretKey) {
+        try {
+          infraMap = await getFullAccountInfrastructure({
+            awsAccessKeyId: cloudCredentials.awsAccessKeyId,
+            awsSecretKey: cloudCredentials.awsSecretKey,
+            awsRegion: cloudCredentials.awsRegion || 'us-east-1',
+          });
+        } catch (infraErr: any) {
+          console.warn("[ARIA Chat] InfraMap fetch failed (non-fatal):", infraErr.message);
+        }
+      }
+
+      const result = await ariaChat(messages, telemetrySnapshot, infraMap);
       return res.json(result);
     } catch (err: any) {
       // Catch ALL JWT errors (JsonWebTokenError, TokenExpiredError, NotBeforeError)

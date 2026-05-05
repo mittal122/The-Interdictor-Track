@@ -6,11 +6,12 @@
 
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import type { InfraMap } from './awsInfrastructureEngine';
 
 dotenv.config();
 
 const NVIDIA_API_KEY = process.env.NVIDIA_NIM_API_KEY;
-const NVIDIA_MODEL = process.env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-8b-instruct';
+const NVIDIA_MODEL = process.env.NVIDIA_NIM_MODEL || 'meta/llama-3.3-70b-instruct';
 
 const nimClient = new OpenAI({
     apiKey: NVIDIA_API_KEY || 'not-set',
@@ -42,7 +43,7 @@ export interface AriaChatResult {
     isSimulated: boolean;
 }
 
-function buildSystemPrompt(telemetry?: TelemetryContext): string {
+function buildSystemPrompt(telemetry?: TelemetryContext, infraMap?: InfraMap | null): string {
     const now = new Date().toISOString();
 
     const nodesList = telemetry?.nodes
@@ -70,6 +71,80 @@ ${storageList ? '\n### Storage Volumes\n' + storageList : ''}
 `
         : `\n## Live Telemetry: Not available (running in Demo mode)\n`;
 
+    // ── Full Infrastructure Inventory (from awsInfrastructureEngine) ────────
+    let infraBlock = '';
+    if (infraMap && infraMap.nodes && infraMap.nodes.length > 0) {
+        const groupByType = (type: string) =>
+            infraMap.nodes.filter((n: any) => n.type === type);
+
+        const ec2s = groupByType('ec2');
+        const rdss = groupByType('rds');
+        const lambdas = groupByType('lambda');
+        const vpcs = groupByType('vpc');
+        const s3s = groupByType('s3');
+        const elbs = groupByType('elb');
+        const ebss = groupByType('ebs');
+        const sgs = groupByType('sg');
+        const asgs = groupByType('asg');
+        const eips = groupByType('eip');
+        const iamRoles = groupByType('iam-role');
+        const iamUsers = groupByType('iam-user');
+        const r53Zones = groupByType('route53-zone');
+
+        infraBlock = `
+## Full AWS Account Infrastructure Inventory (${infraMap.nodes.length} resources)
+Scanned at: ${new Date(infraMap.fetchedAt).toISOString()}
+
+### EC2 Instances (${ec2s.length})
+${ec2s.map((n: any) => `- ${n.name} (${n.meta?.instanceId}) | Type: ${n.meta?.type} | Region: ${n.region} | Status: **${n.status}** | Private IP: ${n.meta?.privateIp || 'N/A'} | Public IP: ${n.meta?.publicIp || 'N/A'} | State: ${n.meta?.state || n.status}`).join('\n') || 'None found'}
+
+### RDS Databases (${rdss.length})
+${rdss.map((n: any) => `- ${n.name} | Engine: ${n.meta?.engine} ${n.meta?.version || ''} | Class: ${n.meta?.class} | Region: ${n.region} | Status: **${n.status}** | Multi-AZ: ${n.meta?.multiAz} | Storage: ${n.meta?.storage}GB`).join('\n') || 'None found'}
+
+### Lambda Functions (${lambdas.length})
+${lambdas.map((n: any) => `- ${n.name} | Runtime: ${n.meta?.runtime} | Memory: ${n.meta?.memoryMB}MB | Timeout: ${n.meta?.timeout}s | Region: ${n.region}`).join('\n') || 'None found'}
+
+### S3 Buckets (${s3s.length})
+${s3s.map((n: any) => `- ${n.name}`).join('\n') || 'None found'}
+
+### VPCs (${vpcs.length})
+${vpcs.map((n: any) => `- ${n.name} (${n.meta?.vpcId}) | CIDR: ${n.meta?.cidr} | Region: ${n.region} | Default: ${n.meta?.isDefault}`).join('\n') || 'None found'}
+
+### Load Balancers (${elbs.length})
+${elbs.map((n: any) => `- ${n.name} | Type: ${n.meta?.type} | Scheme: ${n.meta?.scheme} | DNS: ${n.meta?.dnsName || 'N/A'} | Region: ${n.region}`).join('\n') || 'None found'}
+
+### EBS Volumes (${ebss.length})
+${ebss.map((n: any) => `- ${n.name} (${n.meta?.volumeId}) | ${n.meta?.size}GB ${n.meta?.volumeType} | Status: **${n.status}** | Attached to: ${n.meta?.attachedTo || 'UNATTACHED (orphan)'}`).join('\n') || 'None found'}
+
+### Security Groups (${sgs.length})
+${sgs.map((n: any) => `- ${n.name} (${n.meta?.sgId}) | VPC: ${n.meta?.vpcId} | Inbound Rules: ${n.meta?.inboundRules} | Outbound Rules: ${n.meta?.outboundRules} | Status: **${n.status}**`).join('\n') || 'None found'}
+
+### Auto Scaling Groups (${asgs.length})
+${asgs.map((n: any) => `- ${n.name} | Min: ${n.meta?.minSize} Max: ${n.meta?.maxSize} Desired: ${n.meta?.desiredCapacity} | Active Instances: ${n.meta?.instanceCount} | Status: **${n.status}**`).join('\n') || 'None found'}
+
+### Elastic IPs (${eips.length})
+${eips.map((n: any) => `- ${n.name} | Status: **${n.status}** | Instance: ${n.meta?.instanceId || 'UNASSOCIATED (orphan)'}`).join('\n') || 'None found'}
+
+### IAM Roles (${iamRoles.length})
+${iamRoles.slice(0, 20).map((n: any) => `- ${n.name}`).join('\n') || 'None found'}${iamRoles.length > 20 ? `\n- ... and ${iamRoles.length - 20} more roles` : ''}
+
+### IAM Users (${iamUsers.length})
+${iamUsers.map((n: any) => `- ${n.name}`).join('\n') || 'None found'}
+
+### Route53 Hosted Zones (${r53Zones.length})
+${r53Zones.map((n: any) => `- ${n.name} | Records: ${n.meta?.recordCount} | Private: ${n.meta?.privateZone}`).join('\n') || 'None found'}
+
+### Infrastructure Summary
+- Total Resources: ${infraMap.summary.totalResources}
+- Active: ${infraMap.summary.activeCount}
+- Stopped: ${infraMap.summary.stoppedCount}
+- Orphaned: ${infraMap.summary.orphanCount}
+- Idle: ${infraMap.summary.idleCount}
+- Regions Covered: ${infraMap.summary.regionCount}
+- Service Types: ${infraMap.summary.serviceTypes.join(', ')}
+`;
+    }
+
     return `You are ARIA (Automated Response & Infrastructure Analyst), an expert AWS cloud infrastructure intelligence assistant built into the CloudScope platform. You help DevOps engineers, SREs, and cloud architects understand their AWS infrastructure in real time.
 
 You have expertise in:
@@ -86,25 +161,30 @@ You always give clear, structured answers. You MUST strictly follow this exact 3
 [State exactly what information is needed to answer the user's request]
 
 **Step 2. Data Retrieval:**
-[State the exact data you are pulling from the live telemetry above. DO NOT hallucinate data not present in the telemetry block.]
+[State the exact data you are pulling from the infrastructure inventory and telemetry above. DO NOT hallucinate data not present in these blocks. If data IS present, always use the real values.]
 
 **Step 3. Final Response:**
 [Provide the exact formatted answer based ON THAT DATA, using bullet points or numbered lists. Be concise, exact, and never give a generic "suggestion" if the user asked a specific question.]
 
-Here is an example of a perfect response to "Which compute instances are online?":
+Here is an example of a perfect response to "How many EC2 instances are running?":
 **Step 1. Information Analysis:**
-I need to check the status of all compute nodes to determine which ones are running.
+I need to check the EC2 Instances section of the infrastructure inventory to count running vs stopped instances.
 
 **Step 2. Data Retrieval:**
-Checking the telemetry block for onlineNodesCount and the specific node statuses.
+Checking the Full AWS Account Infrastructure Inventory → EC2 Instances section.
 
 **Step 3. Final Response:**
-1. **app-server-1** (us-east-1a)
-2. **db-primary** (us-east-1b)
+**Total EC2 Instances: 3**
+- 🟢 **Running:** 2 instances
+  1. **web-server** (i-0abc123) — t3.medium in us-east-1
+  2. **api-server** (i-0def456) — t3.large in us-east-1
+- 🔴 **Stopped:** 1 instance
+  1. **batch-worker** (i-0ghi789) — c5.xlarge in eu-west-1
 
-You must use those exact three headers for every single response. Do not add any conversational text before Step 1.
+You must use those exact three headers for every single response. Do not add any conversational text before Step 1. Always reference specific resource names, IDs, regions, and statuses from the data.
 
-${telemetryBlock}`;
+${telemetryBlock}
+${infraBlock}`;
 }
 
 const DEMO_RESPONSES: Record<string, string> = {
@@ -253,7 +333,8 @@ function enforceThreeStepFormat(userMsg: string, aiResponse: string, telemetry?:
 
 export async function ariaChat(
     messages: ChatMessage[],
-    telemetry?: TelemetryContext
+    telemetry?: TelemetryContext,
+    infraMap?: InfraMap | null
 ): Promise<AriaChatResult> {
     const startMs = Date.now();
     const lastUserMessage = [...messages].reverse().find(m => m.role === 'user')?.content || '';
@@ -270,7 +351,7 @@ export async function ariaChat(
         };
     }
 
-    const systemPrompt = buildSystemPrompt(telemetry);
+    const systemPrompt = buildSystemPrompt(telemetry, infraMap);
 
     const nimMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         { role: 'system', content: systemPrompt },
@@ -281,7 +362,8 @@ export async function ariaChat(
         const result = await nimClient.chat.completions.create({
             model: NVIDIA_MODEL,
             messages: nimMessages,
-            temperature: 0.5,
+            temperature: 0.2,
+            top_p: 0.7,
             max_tokens: 1024,
         });
 
