@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ShieldAlert, Server, Lock, UserPlus, LogIn } from 'lucide-react';
 
+// Backend URL: falls back to same-origin for local dev
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+
 // ── Client-side auth helpers ────────────────────────────────────────────────
 // Used as fallback when the Express backend is unreachable (e.g. Vercel deploy).
 // Stores users in localStorage with plain-text passwords (acceptable for demo).
@@ -66,7 +69,7 @@ export function Login() {
 
     // 1) Try the Express backend first
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(`${BACKEND_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),

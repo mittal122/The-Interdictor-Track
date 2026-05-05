@@ -4,6 +4,10 @@ import { useAuth } from './AuthContext';
 import { useAppMode } from './AppModeContext';
 import { useCredentials } from './CredentialsContext';
 
+// Backend URL: set VITE_BACKEND_URL in Vercel env vars to point at your deployed backend
+// (e.g. https://the-interdictor-track.onrender.com). Falls back to same-origin for local dev.
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+
 export type ConnectionState = 'demo' | 'connecting' | 'live';
 
 interface SocketContextType {
@@ -89,7 +93,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     // The backend stores cloudCredentials per-socket and uses them to fetch
     // real AWS EC2 + billing data, then emits personalized telemetry to this socket only.
     setConnectionState('connecting');
-    const newSocket = io(window.location.origin, {
+    const newSocket = io(BACKEND_URL, {
       auth: {
         token,
         // Pass credentials to backend — they're stored server-side in socket.data

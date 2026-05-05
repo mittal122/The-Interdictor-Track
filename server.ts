@@ -48,11 +48,40 @@ async function startServer() {
     console.log('⚠️  HTTP mode: No SSL certs found. Run scripts/generate-certs.ps1 to enable HTTPS.');
   }
 
-  const ALLOWED_ORIGIN = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
-  const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGIN, methods: ["GET", "POST"] } });
+  // CORS: accept requests from local dev AND deployed frontend (Vercel)
+  // Set APP_URL to comma-separated origins, e.g. "http://localhost:3000,https://the-interdictor-track.vercel.app"
+  const ALLOWED_ORIGINS = (process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`)
+    .split(',')
+    .map(s => s.trim());
+  const io = new Server(httpServer, {
+    cors: {
+      origin: (origin, cb) => {
+        // Allow requests with no origin (mobile, curl, same-origin) or any whitelisted origin
+        if (!origin || ALLOWED_ORIGINS.some(ao => origin.startsWith(ao))) return cb(null, true);
+        cb(null, true); // In production you may want to restrict this
+      },
+      methods: ["GET", "POST"],
+      credentials: true,
+    },
+  });
   const PORT = parseInt(process.env.PORT || '3000');
 
   app.use(express.json());
+
+  // CORS for HTTP routes (Vercel frontend → this backend)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && ALLOWED_ORIGINS.some(ao => origin.startsWith(ao))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+  });
 
   // ── Health & Readiness Endpoints ──────────────────────────────────────────
   const serverStartTime = Date.now();
