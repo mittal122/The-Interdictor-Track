@@ -5,6 +5,7 @@ import {
     CheckCircle2, XCircle, CircleDot, Search, RefreshCw, Boxes, Layers, GitMerge, Lock,
     DollarSign, FileCode, Box, Maximize, Minimize, Sparkles
 } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import ReactFlow, { Background, Controls, MarkerType, NodeProps, Handle, Position, Edge, Node as FlowNode } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { cn } from "../utils/cn";
@@ -776,6 +777,13 @@ export function AwsArchitecture() {
                             )}
                         </button>
                     )}
+                    <RefreshButton onRefresh={() => {
+                        if (socket && isLive) {
+                            handleFetch();
+                        } else {
+                            setInfraData(null);
+                        }
+                    }} />
                     {data && (
                         <>
                             <button

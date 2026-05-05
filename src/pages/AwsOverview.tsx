@@ -3,6 +3,7 @@ import {
     Boxes, Server, HardDrive, Play, Square, AlertTriangle, CheckCircle2, XCircle,
     Loader2, Cloud, Activity, RefreshCw
 } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
@@ -59,7 +60,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── Main Page ──────────────────────────────────────────────────────────────
 export function AwsOverview() {
-    const { telemetry, socket, connectionState } = useSocket();
+    const { telemetry, socket, connectionState, requestRefresh } = useSocket();
     const { mode } = useAppMode();
     const isLive = mode === "live" && connectionState === "live";
 
@@ -119,11 +120,14 @@ export function AwsOverview() {
                         {isLive ? "Live Account Inventory" : "Demo Simulation"}
                     </p>
                 </div>
-                {!isLive && (
-                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-semibold text-amber-400 uppercase tracking-widest">
-                        Demo Mode
-                    </span>
-                )}
+                <div className="flex items-center gap-3">
+                    {!isLive && (
+                        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-semibold text-amber-400 uppercase tracking-widest">
+                            Demo Mode
+                        </span>
+                    )}
+                    <RefreshButton onRefresh={requestRefresh} />
+                </div>
             </div>
 
             {/* Summary Cards */}

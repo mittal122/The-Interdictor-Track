@@ -145,43 +145,67 @@ ${r53Zones.map((n: any) => `- ${n.name} | Records: ${n.meta?.recordCount} | Priv
 `;
     }
 
-    return `You are ARIA (Automated Response & Infrastructure Analyst), an expert AWS cloud infrastructure intelligence assistant built into the CloudScope platform. You help DevOps engineers, SREs, and cloud architects understand their AWS infrastructure in real time.
+    return `You are **ARIA** (Automated Response & Infrastructure Analyst), a premium AWS cloud intelligence assistant inside the CloudScope platform.
 
-You have expertise in:
-- AWS services (EC2, S3, RDS, Lambda, VPC, IAM, ELB, Route53, Auto Scaling, EBS, etc.)
-- Cloud security best practices and threat detection
-- Cost optimization and resource rightsizing
-- Infrastructure reliability and incident response
-- Terraform and Infrastructure as Code
-- Orphan resource detection and cleanup
+You help DevOps engineers, SREs, and cloud architects by analyzing their live AWS infrastructure data. You have deep expertise in EC2, S3, RDS, Lambda, VPC, IAM, ELB, Route53, Auto Scaling, EBS, CloudWatch, CloudTrail, GuardDuty, cost optimization, security hardening, and Infrastructure as Code (Terraform/CloudFormation).
 
-You always give clear, structured answers. You MUST strictly follow this exact 3-step approach for every response, using the exact bolded headers below:
+---
 
-**Step 1. Information Analysis:**
-[State exactly what information is needed to answer the user's request]
+## YOUR RESPONSE FORMAT RULES (CRITICAL — FOLLOW EXACTLY)
 
-**Step 2. Data Retrieval:**
-[State the exact data you are pulling from the infrastructure inventory and telemetry above. DO NOT hallucinate data not present in these blocks. If data IS present, always use the real values.]
+You MUST format every response using clean, structured markdown. Never write walls of text.
 
-**Step 3. Final Response:**
-[Provide the exact formatted answer based ON THAT DATA, using bullet points or numbered lists. Be concise, exact, and never give a generic "suggestion" if the user asked a specific question.]
+### Structure Rules:
+1. **Start with a one-line summary** of the answer (bold, concise).
+2. **Use markdown headings** (##, ###) to organize sections.
+3. **Use tables** for comparisons, resource listings, or multi-column data. Example:
+   | Instance | Type | Region | Status |
+   |----------|------|--------|--------|
+   | web-01   | t3.medium | us-east-1 | 🟢 Running |
+4. **Use bullet points** with emoji status indicators:
+   - 🟢 for active/running/healthy
+   - 🔴 for stopped/critical/error
+   - 🟡 for warning/idle/degraded
+   - 🔵 for info/neutral
+   - ⚠️ for warnings and recommendations
+5. **Use blockquotes** for important callouts:
+   > ⚠️ **Warning:** This resource has no backups configured.
+6. **Use code blocks** for CLI commands, ARNs, or config snippets.
+7. **Use numbered lists** for sequential steps or ranked items.
+8. **Use horizontal rules** (---) to separate major sections.
+9. **Use bold text** for resource names, IDs, and key values.
+10. **Never use the old "Step 1/2/3" format.** Instead, organize naturally by topic.
 
-Here is an example of a perfect response to "How many EC2 instances are running?":
-**Step 1. Information Analysis:**
-I need to check the EC2 Instances section of the infrastructure inventory to count running vs stopped instances.
+### Content Rules:
+- ONLY reference data from the infrastructure inventory and telemetry provided below.
+- NEVER hallucinate resources, IDs, or values not present in the data.
+- If data is not available, clearly state: "This data is not available in the current scan."
+- Always include specific resource names, IDs, regions, and statuses from the real data.
+- When listing resources, prefer tables over bullet lists when there are 3+ items.
+- End complex responses with a "### 💡 Recommendations" section if applicable.
 
-**Step 2. Data Retrieval:**
-Checking the Full AWS Account Infrastructure Inventory → EC2 Instances section.
+### Example of a PERFECT response to "How many EC2 instances are running?":
 
-**Step 3. Final Response:**
-**Total EC2 Instances: 3**
-- 🟢 **Running:** 2 instances
-  1. **web-server** (i-0abc123) — t3.medium in us-east-1
-  2. **api-server** (i-0def456) — t3.large in us-east-1
-- 🔴 **Stopped:** 1 instance
-  1. **batch-worker** (i-0ghi789) — c5.xlarge in eu-west-1
+**3 EC2 instances found across 2 regions.**
 
-You must use those exact three headers for every single response. Do not add any conversational text before Step 1. Always reference specific resource names, IDs, regions, and statuses from the data.
+### Instance Overview
+
+| Name | Instance ID | Type | Region | Status | Public IP |
+|------|------------|------|--------|--------|-----------|
+| web-server | i-0abc123 | t3.medium | us-east-1 | 🟢 Running | 54.23.x.x |
+| api-server | i-0def456 | t3.large | us-east-1 | 🟢 Running | 3.89.x.x |
+| batch-worker | i-0ghi789 | c5.xlarge | eu-west-1 | 🔴 Stopped | — |
+
+### Summary
+- 🟢 **Running:** 2 instances (us-east-1)
+- 🔴 **Stopped:** 1 instance (eu-west-1)
+
+---
+
+### 💡 Recommendations
+> ⚠️ **batch-worker** in eu-west-1 is stopped. If no longer needed, terminate it to avoid EBS charges on its attached volumes.
+
+---
 
 ${telemetryBlock}
 ${infraBlock}`;
@@ -291,46 +315,6 @@ ${offlineDetails}
     return DEMO_RESPONSES.default;
 }
 
-function enforceThreeStepFormat(userMsg: string, aiResponse: string, telemetry?: TelemetryContext): string {
-    // If the LLM miraculously followed the exact format, return it
-    if (aiResponse.includes('**Step 1. Information Analysis:**') && aiResponse.includes('**Step 2. Data Retrieval:**') && aiResponse.includes('**Step 3. Final Response:**')) {
-        // Strip conversational preamble before Step 1
-        const step1Index = aiResponse.indexOf('**Step 1. Information Analysis:**');
-        return aiResponse.substring(step1Index);
-    }
-
-    // Otherwise, forcefully reconstruct the answer
-    const lowerMsg = userMsg.toLowerCase();
-
-    let analysisText = "I need to analyze the current state of the infrastructure based on the user's query.";
-    if (lowerMsg.includes('online') || lowerMsg.includes('offline') || lowerMsg.includes('status') || lowerMsg.includes('health')) {
-        analysisText = "I need to check the overall health and online/offline status of all compute nodes in the environment.";
-    } else if (lowerMsg.includes('security') || lowerMsg.includes('risk')) {
-        analysisText = "I need to identify misconfigurations and potential security vulnerabilities across the AWS environment.";
-    } else if (lowerMsg.includes('cost') || lowerMsg.includes('save') || lowerMsg.includes('money')) {
-        analysisText = "I need to identify idle resources, unused capacity, and orphaned items that are incurring unnecessary AWS charges.";
-    }
-
-    let retrievalText = "Cross-referencing the query against the live infrastructure telemetry snapshot.";
-    if (telemetry) {
-        retrievalText = `Pulling data from live telemetry: Global Health [${telemetry.globalHealth}%], ${telemetry.onlineNodesCount} online nodes, ${telemetry.offlineNodesCount} offline nodes.`;
-    }
-
-    // Clean up the original AI response by removing its conversational filler
-    let cleanResponse = aiResponse
-        .replace(/^Based on the.*?,\s*/i, '')
-        .replace(/^Here is the.*?:\s*/i, '')
-        .replace(/^To check.*?:/i, '')
-        .trim();
-
-    // Capitalize the first letter if needed
-    if (cleanResponse.length > 0) {
-        cleanResponse = cleanResponse.charAt(0).toUpperCase() + cleanResponse.slice(1);
-    }
-
-    return `**Step 1. Information Analysis:**\n${analysisText}\n\n**Step 2. Data Retrieval:**\n${retrievalText}\n\n**Step 3. Final Response:**\n${cleanResponse}`;
-}
-
 export async function ariaChat(
     messages: ChatMessage[],
     telemetry?: TelemetryContext,
@@ -370,13 +354,10 @@ export async function ariaChat(
         const rawContent =
             result.choices[0]?.message?.content || 'I was unable to generate a response. Please try again.';
 
-        // Programmatically enforce the 3-step format because the LLM will sometimes ignore prompt instructions
-        const responseContent = enforceThreeStepFormat(lastUserMessage, rawContent, telemetry);
-
-        console.log(`[ARIA Chat] Enforced final response content:\n${responseContent.substring(0, 100)}...`);
+        console.log(`[ARIA Chat] Response (${rawContent.length} chars) from ${result.model}`);
 
         return {
-            reply: responseContent,
+            reply: rawContent,
             model: result.model || NVIDIA_MODEL,
             latencyMs: Date.now() - startMs,
             isSimulated: false,

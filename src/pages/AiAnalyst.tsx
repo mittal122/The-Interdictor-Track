@@ -38,50 +38,231 @@ const EXAMPLE_PROMPTS = [
 
 function RenderContent({ text }: { text: string }) {
     const lines = text.split("\n");
-    return (
-        <div className="space-y-1">
-            {lines.map((line, i) => {
-                // Headers
-                if (line.startsWith("### ")) return <p key={i} className="font-bold text-violet-300 text-sm mt-3 mb-1">{line.slice(4)}</p>;
-                if (line.startsWith("## ")) return <p key={i} className="font-bold text-violet-300 text-sm mt-3 mb-1">{line.slice(3)}</p>;
-                if (line.startsWith("# ")) return <p key={i} className="font-bold text-violet-200 text-sm mt-3 mb-1">{line.slice(2)}</p>;
+    const elements: React.ReactNode[] = [];
+    let i = 0;
 
-                // Bold via **text**
-                const boldReplaced = line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    // Helper: format inline markdown (bold, italic, inline code, links)
+    const fmt = (s: string): string => {
+        return s
+            .replace(/`([^`]+)`/g, '<code style="background:rgba(139,92,246,0.15);padding:1px 5px;border-radius:4px;font-size:0.7rem;color:#c4b5fd;font-family:monospace">$1</code>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#e9d5ff">$1</strong>')
+            .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#a78bfa;text-decoration:underline">$1</a>');
+    };
 
-                // Bullet points
-                if (line.startsWith("- ") || line.startsWith("* ")) {
-                    return (
-                        <div key={i} className="flex items-start gap-2 mt-1">
-                            <span className="text-violet-400 mt-0.5 shrink-0">•</span>
-                            <span className="text-xs leading-relaxed" dangerouslySetInnerHTML={{ __html: boldReplaced.slice(2) }} />
-                        </div>
-                    );
-                }
+    while (i < lines.length) {
+        const line = lines[i];
+        const trimmed = line.trim();
 
-                // Numbered list (e.g., "1. " or "**Step 1.**")
-                const numMatch = line.match(/^(\d+\.|(?:.*?)(?:Step \d+|Step \d+\.).*?:?)\s+(.*)/);
-                if (numMatch) {
-                    return (
-                        <div key={i} className="flex items-start gap-2 mt-2">
-                            <span className="text-violet-400 font-bold text-xs shrink-0" dangerouslySetInnerHTML={{ __html: numMatch[1].replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>") }} />
-                            <span className="text-xs leading-relaxed" dangerouslySetInnerHTML={{ __html: numMatch[2].replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>") }} />
-                        </div>
-                    );
-                }
+        // ── Code blocks ───────────────────────────────────────────
+        if (trimmed.startsWith("```")) {
+            const lang = trimmed.slice(3).trim();
+            const codeLines: string[] = [];
+            i++;
+            while (i < lines.length && !lines[i].trim().startsWith("```")) {
+                codeLines.push(lines[i]);
+                i++;
+            }
+            i++; // skip closing ```
+            elements.push(
+                <div key={`code-${i}`} style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '8px', border: '1px solid rgba(139,92,246,0.2)', padding: '12px 14px', margin: '8px 0', overflowX: 'auto' }}>
+                    {lang && <div style={{ fontSize: '0.6rem', color: '#8b5cf6', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px' }}>{lang}</div>}
+                    <pre style={{ margin: 0, fontSize: '0.7rem', lineHeight: 1.5, color: '#e2e8f0', fontFamily: "'Fira Code', 'Cascadia Code', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word' as const }}>
+                        {codeLines.join('\n')}
+                    </pre>
+                </div>
+            );
+            continue;
+        }
 
-                // If the entire line is bold (like a sub-header)
-                if (line.startsWith("**") && line.endsWith("**")) {
-                    return <p key={i} className="font-bold text-violet-300 text-xs mt-3 mb-1">{line.replace(/\*\*(.*?)\*\*/g, "$1")}</p>;
-                }
+        // ── Horizontal Rule ───────────────────────────────────────
+        if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
+            elements.push(
+                <hr key={`hr-${i}`} style={{ border: 'none', height: '1px', background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.4), transparent)', margin: '12px 0' }} />
+            );
+            i++;
+            continue;
+        }
 
-                if (line.trim() === "") return <div key={i} className="h-1" />;
+        // ── Blockquote / Callout boxes ────────────────────────────
+        if (trimmed.startsWith("> ")) {
+            const quoteLines: string[] = [];
+            while (i < lines.length && (lines[i].trim().startsWith("> ") || lines[i].trim() === ">")) {
+                quoteLines.push(lines[i].trim().replace(/^>\s?/, ''));
+                i++;
+            }
+            // Detect callout type
+            const content = quoteLines.join('\n');
+            let borderColor = 'rgba(139,92,246,0.5)';
+            let bgColor = 'rgba(139,92,246,0.06)';
+            let icon = '💡';
+            if (content.toLowerCase().includes('warning') || content.toLowerCase().includes('⚠')) {
+                borderColor = 'rgba(234,179,8,0.5)'; bgColor = 'rgba(234,179,8,0.06)'; icon = '⚠️';
+            } else if (content.toLowerCase().includes('error') || content.toLowerCase().includes('🔴')) {
+                borderColor = 'rgba(239,68,68,0.5)'; bgColor = 'rgba(239,68,68,0.06)'; icon = '🔴';
+            } else if (content.toLowerCase().includes('success') || content.toLowerCase().includes('✅') || content.toLowerCase().includes('🟢')) {
+                borderColor = 'rgba(34,197,94,0.5)'; bgColor = 'rgba(34,197,94,0.06)'; icon = '✅';
+            } else if (content.toLowerCase().includes('info') || content.toLowerCase().includes('ℹ')) {
+                borderColor = 'rgba(59,130,246,0.5)'; bgColor = 'rgba(59,130,246,0.06)'; icon = 'ℹ️';
+            }
+            elements.push(
+                <div key={`quote-${i}`} style={{
+                    borderLeft: `3px solid ${borderColor}`, background: bgColor,
+                    borderRadius: '0 8px 8px 0', padding: '10px 14px', margin: '8px 0',
+                }}>
+                    {quoteLines.map((ql, qi) => (
+                        <p key={qi} style={{ fontSize: '0.75rem', lineHeight: 1.6, color: '#d1d5db', margin: '2px 0' }}
+                           dangerouslySetInnerHTML={{ __html: fmt(ql) }} />
+                    ))}
+                </div>
+            );
+            continue;
+        }
 
-                const formatted = boldReplaced.replace(/\*(.*?)\*/g, "<em>$1</em>");
-                return <p key={i} className="text-xs leading-relaxed mt-1" dangerouslySetInnerHTML={{ __html: formatted }} />;
-            })}
-        </div>
-    );
+        // ── Table detection ───────────────────────────────────────
+        if (trimmed.includes('|') && trimmed.startsWith('|')) {
+            const tableLines: string[] = [];
+            while (i < lines.length && lines[i].trim().includes('|') && lines[i].trim().startsWith('|')) {
+                tableLines.push(lines[i].trim());
+                i++;
+            }
+            // Filter separator row
+            const rows = tableLines.filter(r => !r.match(/^\|[\s\-:|]+\|$/));
+            const headerCells = rows[0]?.split('|').filter(c => c.trim()) || [];
+            const bodyRows = rows.slice(1);
+            elements.push(
+                <div key={`table-${i}`} style={{ overflowX: 'auto', margin: '8px 0', borderRadius: '8px', border: '1px solid rgba(139,92,246,0.2)' }}>
+                    <table style={{ width: '100%', fontSize: '0.7rem', borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr style={{ background: 'rgba(139,92,246,0.12)' }}>
+                                {headerCells.map((cell, ci) => (
+                                    <th key={ci} style={{ padding: '8px 12px', textAlign: 'left', color: '#c4b5fd', fontWeight: 600, borderBottom: '1px solid rgba(139,92,246,0.2)' }}
+                                        dangerouslySetInnerHTML={{ __html: fmt(cell.trim()) }} />
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {bodyRows.map((row, ri) => {
+                                const cells = row.split('|').filter(c => c.trim());
+                                return (
+                                    <tr key={ri} style={{ background: ri % 2 === 0 ? 'transparent' : 'rgba(139,92,246,0.04)' }}>
+                                        {cells.map((cell, ci) => (
+                                            <td key={ci} style={{ padding: '6px 12px', color: '#d1d5db', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                                                dangerouslySetInnerHTML={{ __html: fmt(cell.trim()) }} />
+                                        ))}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            );
+            continue;
+        }
+
+        // ── Headers ───────────────────────────────────────────────
+        if (trimmed.startsWith("#### ")) {
+            elements.push(<p key={`h4-${i}`} style={{ fontSize: '0.75rem', fontWeight: 600, color: '#c4b5fd', marginTop: '14px', marginBottom: '4px' }}>{trimmed.slice(5)}</p>);
+            i++; continue;
+        }
+        if (trimmed.startsWith("### ")) {
+            elements.push(
+                <div key={`h3-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '16px', marginBottom: '6px' }}>
+                    <div style={{ width: '3px', height: '14px', background: 'linear-gradient(180deg, #8b5cf6, #6d28d9)', borderRadius: '2px' }} />
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#e9d5ff' }}>{trimmed.slice(4)}</span>
+                </div>
+            );
+            i++; continue;
+        }
+        if (trimmed.startsWith("## ")) {
+            elements.push(
+                <div key={`h2-${i}`} style={{ marginTop: '18px', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(139,92,246,0.2)' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#e9d5ff', letterSpacing: '0.02em' }} dangerouslySetInnerHTML={{ __html: fmt(trimmed.slice(3)) }} />
+                </div>
+            );
+            i++; continue;
+        }
+        if (trimmed.startsWith("# ")) {
+            elements.push(
+                <div key={`h1-${i}`} style={{ marginTop: '18px', marginBottom: '10px', paddingBottom: '8px', borderBottom: '2px solid rgba(139,92,246,0.3)' }}>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#f5f3ff', letterSpacing: '0.02em' }} dangerouslySetInnerHTML={{ __html: fmt(trimmed.slice(2)) }} />
+                </div>
+            );
+            i++; continue;
+        }
+
+        // ── Numbered list ─────────────────────────────────────────
+        const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+        if (numMatch) {
+            elements.push(
+                <div key={`num-${i}`} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '4px', paddingLeft: '4px' }}>
+                    <span style={{
+                        minWidth: '20px', height: '20px', borderRadius: '50%',
+                        background: 'linear-gradient(135deg, rgba(139,92,246,0.3), rgba(109,40,217,0.3))',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '0.65rem', fontWeight: 700, color: '#c4b5fd', flexShrink: 0
+                    }}>{numMatch[1]}</span>
+                    <span style={{ fontSize: '0.75rem', lineHeight: 1.6, color: '#d1d5db' }}
+                          dangerouslySetInnerHTML={{ __html: fmt(numMatch[2]) }} />
+                </div>
+            );
+            i++; continue;
+        }
+
+        // ── Indented sub-bullets (e.g. "  - item" or "   - item") ─
+        const indentBulletMatch = trimmed.match(/^[-*]\s+(.*)/);
+        const indent = line.length - line.trimStart().length;
+        if (indentBulletMatch && indent >= 2) {
+            elements.push(
+                <div key={`sub-${i}`} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '2px', paddingLeft: `${Math.min(indent, 6) * 8}px` }}>
+                    <span style={{ color: '#7c3aed', marginTop: '4px', fontSize: '0.4rem', flexShrink: 0 }}>●</span>
+                    <span style={{ fontSize: '0.72rem', lineHeight: 1.5, color: '#c7c7cc' }}
+                          dangerouslySetInnerHTML={{ __html: fmt(indentBulletMatch[1]) }} />
+                </div>
+            );
+            i++; continue;
+        }
+
+        // ── Top-level bullet ──────────────────────────────────────
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+            elements.push(
+                <div key={`bullet-${i}`} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '4px', paddingLeft: '4px' }}>
+                    <span style={{ color: '#8b5cf6', marginTop: '5px', fontSize: '0.35rem', flexShrink: 0 }}>◆</span>
+                    <span style={{ fontSize: '0.75rem', lineHeight: 1.6, color: '#d1d5db' }}
+                          dangerouslySetInnerHTML={{ __html: fmt(trimmed.slice(2)) }} />
+                </div>
+            );
+            i++; continue;
+        }
+
+        // ── Standalone bold line (section label) ──────────────────
+        if (trimmed.startsWith("**") && trimmed.endsWith("**") && !trimmed.slice(2, -2).includes("**")) {
+            elements.push(
+                <p key={`bold-${i}`} style={{
+                    fontSize: '0.8rem', fontWeight: 700, color: '#c4b5fd',
+                    marginTop: '14px', marginBottom: '4px',
+                    background: 'linear-gradient(90deg, rgba(139,92,246,0.08), transparent)',
+                    padding: '4px 8px', borderRadius: '4px'
+                }}>{trimmed.replace(/\*\*(.*?)\*\*/g, "$1")}</p>
+            );
+            i++; continue;
+        }
+
+        // ── Empty line ────────────────────────────────────────────
+        if (trimmed === '') {
+            elements.push(<div key={`space-${i}`} style={{ height: '6px' }} />);
+            i++; continue;
+        }
+
+        // ── Regular paragraph ─────────────────────────────────────
+        elements.push(
+            <p key={`p-${i}`} style={{ fontSize: '0.75rem', lineHeight: 1.7, color: '#d1d5db', marginTop: '3px' }}
+               dangerouslySetInnerHTML={{ __html: fmt(trimmed) }} />
+        );
+        i++;
+    }
+
+    return <div>{elements}</div>;
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────

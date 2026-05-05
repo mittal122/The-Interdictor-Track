@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { DollarSign, Network, Layers, ChevronDown, ChevronRight, Loader2, AlertTriangle, Lightbulb, TrendingDown, Globe, Server, Zap, HardDrive, Database, Shield, Radio } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
@@ -158,20 +159,23 @@ export function CostEstimation() {
   const [expandedSvc, setExpandedSvc] = useState<Set<string>>(new Set());
   const [expandedVpc, setExpandedVpc] = useState<Set<string>>(new Set());
 
-  // Fetch both cost views on mount
-  useEffect(() => {
+  // Extracted fetch logic for mount + refresh button
+  const fetchCostData = useCallback(() => {
     if (!socket) return;
     setLoading(true);
-    // We request demo infra from the architecture page's data shape
     socket.emit("fetch_full_account_map", (res: any) => {
       const infraData = res.status === "success" ? res.data : null;
       if (!infraData) { setLoading(false); return; }
-      // Fetch both cost breakdowns
       let done = 0;
       socket.emit("estimate_costs", { infraData }, (r: any) => { if (r.status==="success") setCostData(r.data); done++; if(done>=2) setLoading(false); });
       socket.emit("estimate_costs_by_vpc", { infraData }, (r: any) => { if (r.status==="success") { setVpcData(r.data); setExpandedVpc(new Set([r.data.vpcGroups[0]?.vpcId].filter(Boolean))); } done++; if(done>=2) setLoading(false); });
     });
   }, [socket]);
+
+  // Fetch on mount
+  useEffect(() => {
+    fetchCostData();
+  }, [fetchCostData]);
 
   const toggleSvc = (s:string) => setExpandedSvc(p=>{const n=new Set(p);n.has(s)?n.delete(s):n.add(s);return n;});
   const toggleVpc = (s:string) => setExpandedVpc(p=>{const n=new Set(p);n.has(s)?n.delete(s):n.add(s);return n;});
@@ -189,7 +193,10 @@ export function CostEstimation() {
           <h2 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><DollarSign className="h-5 w-5 text-emerald-400"/>Cost Estimation & Optimization</h2>
           <p className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Multi-level cost analysis with AI-powered savings recommendations</p>
         </div>
-        {mode === "demo" && <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-semibold text-amber-400 uppercase tracking-widest">Demo Mode</span>}
+        <div className="flex items-center gap-3">
+          {mode === "demo" && <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-semibold text-amber-400 uppercase tracking-widest">Demo Mode</span>}
+          <RefreshButton onRefresh={fetchCostData} />
+        </div>
       </div>
 
       {loading ? (

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { useAppMode } from './AppModeContext';
@@ -10,6 +10,7 @@ interface SocketContextType {
   socket: Socket | null;
   telemetry: any | null;
   connectionState: ConnectionState;
+  requestRefresh: () => void;
 }
 
 const SocketContext = createContext<SocketContextType | null>(null);
@@ -52,6 +53,15 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { mode } = useAppMode();
   const { credentials } = useCredentials();
   const demoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Per-page refresh: in live mode re-requests telemetry; in demo regenerates data
+  const requestRefresh = useCallback(() => {
+    if (mode === 'demo') {
+      setTelemetry(generateDemoTelemetry());
+    } else if (socket?.connected) {
+      socket.emit('request_telemetry_refresh');
+    }
+  }, [mode, socket]);
 
   useEffect(() => {
     // ── DEMO MODE ─────────────────────────────────────────────────────────
@@ -134,7 +144,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   }, [token, mode, credentials]); // re-connect when credentials change
 
   return (
-    <SocketContext.Provider value={{ socket, telemetry, connectionState }}>
+    <SocketContext.Provider value={{ socket, telemetry, connectionState, requestRefresh }}>
       {children}
     </SocketContext.Provider>
   );

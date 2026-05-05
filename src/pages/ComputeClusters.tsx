@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Activity, Cpu, Zap, AlertTriangle, Server, Thermometer, Wifi, FlaskConical } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
@@ -63,7 +64,7 @@ const statusGlow: Record<string, string> = {
 };
 
 export function ComputeClusters() {
-    const { telemetry, socket } = useSocket();
+    const { telemetry, socket, requestRefresh } = useSocket();
     const { mode, selectedRegion } = useAppMode();
     const [localServers, setLocalServers] = useState<ServerUnit[]>(() => generateServers());
     const [selected, setSelected] = useState<ServerUnit | null>(null);
@@ -163,6 +164,7 @@ export function ComputeClusters() {
                             <span className="text-xs font-medium uppercase tracking-widest text-yellow-400">Demo Simulation</span>
                         </>
                     )}
+                    <RefreshButton onRefresh={requestRefresh} />
                 </div>
             </div>
 

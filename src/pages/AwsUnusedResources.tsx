@@ -3,6 +3,7 @@ import {
     Trash2, AlertTriangle, Shield, HardDrive, CircleDot, Loader2, Cloud,
     ArrowLeft, RefreshCw, XCircle, CheckCircle2
 } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import { useNavigate } from "react-router-dom";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
@@ -90,6 +91,7 @@ export function AwsUnusedResources() {
                             {loading ? "Scanning…" : "Scan Account"}
                         </button>
                     )}
+                    {isLive && <RefreshButton onRefresh={handleFetch} />}
                 </div>
             </div>
 

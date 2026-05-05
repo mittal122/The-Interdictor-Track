@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Database, HardDrive, Activity, ArrowUpDown, Zap, Wifi, FlaskConical } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn } from "../utils/cn";
 import { useAppMode } from "../contexts/AppModeContext";
@@ -60,7 +61,7 @@ function getLatencyBorderColor(latency: number): string {
 // --- Component ---
 export function StorageArrays() {
     const { mode, selectedRegion } = useAppMode();
-    const { telemetry } = useSocket();
+    const { telemetry, requestRefresh } = useSocket();
     const [simulatedArrays, setSimulatedArrays] = useState<StorageArray[]>(() => generateArrays());
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [iopsHistory, setIopsHistory] = useState<{ time: string; iops: number }[]>([]);
@@ -143,6 +144,7 @@ export function StorageArrays() {
                             <span className="text-xs font-medium uppercase tracking-widest text-yellow-500">Demo Simulation</span>
                         </>
                     )}
+                    <RefreshButton onRefresh={requestRefresh} />
                 </div>
             </div>
 

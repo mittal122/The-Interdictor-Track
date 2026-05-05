@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Globe, Activity, Network, AlertTriangle, Signal, Wifi, FlaskConical } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
@@ -102,7 +103,7 @@ function healthTextColor(health: number): string {
 }
 
 export function GlobalNodes() {
-    const { telemetry, socket } = useSocket();
+    const { telemetry, socket, requestRefresh } = useSocket();
     const { mode, selectedRegion } = useAppMode();
     const [demoRegions, setDemoRegions] = useState<GridRegion[]>(() => generateDemoRegions());
     const [selected, setSelected] = useState<GridRegion | null>(null);
@@ -187,6 +188,7 @@ export function GlobalNodes() {
                             <span className="text-xs font-medium uppercase tracking-widest text-yellow-400">Demo Feed</span>
                         </>
                     )}
+                    <RefreshButton onRefresh={requestRefresh} />
                 </div>
             </div>
 

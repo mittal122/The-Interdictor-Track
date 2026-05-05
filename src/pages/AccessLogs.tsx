@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Shield, AlertTriangle, Filter, Search, Activity, FileText, X } from "lucide-react";
+import { RefreshButton } from "../components/RefreshButton";
 import { cn } from "../utils/cn";
 import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
@@ -96,7 +97,7 @@ const statusBadge: Record<string, string> = {
 
 export function AccessLogs() {
     const { mode } = useAppMode();
-    const { telemetry } = useSocket();
+    const { telemetry, requestRefresh } = useSocket();
     const [simulatedLogs] = useState<LogEntry[]>(() => generateLogs(500));
 
     const allLogs = useMemo(() => {
@@ -202,6 +203,7 @@ export function AccessLogs() {
                 <div className="flex items-center gap-2">
                     <Shield className="h-4 w-4 text-blue-400" />
                     <span className="text-xs font-medium uppercase tracking-widest text-blue-400">{stats.total} Events</span>
+                    <RefreshButton onRefresh={requestRefresh} />
                 </div>
             </div>
 
