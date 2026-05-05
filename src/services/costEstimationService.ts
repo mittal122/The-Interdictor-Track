@@ -256,3 +256,155 @@ export function estimateCosts(infraMap: InfraMap): CostEstimation {
         disclaimer: 'Estimates are approximate, based on us-east-1 on-demand pricing. Actual costs may vary.',
     };
 }
+
+// ── VPC-Grouped Cost Estimation ───────────────────────────────────────────
+
+interface VpcCostGroup {
+    vpcId: string;
+    vpcName: string;
+    region: string;
+    totalMonthly: number;
+    wastedCost: number;
+    resourceCount: number;
+    byService: { service: string; cost: number; count: number }[];
+    resources: ResourceCost[];
+    wastedResources: ResourceCost[];
+}
+
+export interface VpcCostEstimation {
+    vpcGroups: VpcCostGroup[];
+    unattachedResources: VpcCostGroup;   // resources not in any VPC (S3, IAM, etc.)
+    grandTotalMonthly: number;
+    grandWastedCost: number;
+    currency: string;
+    disclaimer: string;
+}
+
+export function estimateCostsByVpc(infraMap: InfraMap): VpcCostEstimation {
+    const resourceCosts = infraMap.nodes.map(estimateResourceCost);
+
+    // Build a map: nodeId → vpcId (using meta.vpcId or edge traversal)
+    const nodeVpcMap = new Map<string, string>();
+
+    // First pass: direct vpcId in meta
+    for (const node of infraMap.nodes) {
+        if (node.type === 'vpc') {
+            nodeVpcMap.set(node.id, node.id);
+        } else if (node.meta?.vpcId) {
+            // Find the matching VPC node id
+            const vpcNode = infraMap.nodes.find(
+                n => n.type === 'vpc' && (n.meta?.vpcId === node.meta.vpcId || n.id.includes(node.meta.vpcId))
+            );
+            if (vpcNode) {
+                nodeVpcMap.set(node.id, vpcNode.id);
+            }
+        }
+    }
+
+    // Second pass: use edges to link resources that don't have direct vpcId
+    // e.g., EBS attached to EC2 which is in a VPC
+    for (const edge of infraMap.edges) {
+        const sourceVpc = nodeVpcMap.get(edge.source);
+        const targetVpc = nodeVpcMap.get(edge.target);
+        if (sourceVpc && !targetVpc) {
+            nodeVpcMap.set(edge.target, sourceVpc);
+        } else if (targetVpc && !sourceVpc) {
+            nodeVpcMap.set(edge.source, targetVpc);
+        }
+    }
+
+    // Group costs by VPC
+    const vpcMap = new Map<string, { node: InfraNode; costs: ResourceCost[] }>();
+    const unattached: ResourceCost[] = [];
+
+    for (let i = 0; i < infraMap.nodes.length; i++) {
+        const node = infraMap.nodes[i];
+        const cost = resourceCosts[i];
+        const vpcId = nodeVpcMap.get(node.id);
+
+        if (vpcId && node.type !== 'vpc') {
+            if (!vpcMap.has(vpcId)) {
+                const vpcNode = infraMap.nodes.find(n => n.id === vpcId);
+                if (vpcNode) vpcMap.set(vpcId, { node: vpcNode, costs: [] });
+            }
+            vpcMap.get(vpcId)?.costs.push(cost);
+        } else if (node.type !== 'vpc') {
+            unattached.push(cost);
+        }
+    }
+
+    // Build VPC cost groups
+    const vpcGroups: VpcCostGroup[] = [];
+    for (const [vpcId, { node, costs }] of vpcMap.entries()) {
+        const totalMonthly = costs.reduce((s, r) => s + r.monthlyEstimate, 0);
+        const wastedRes = costs.filter(r => r.isWasted);
+        const wastedCost = wastedRes.reduce((s, r) => s + r.monthlyEstimate, 0);
+
+        // By service within this VPC
+        const svcMap: Record<string, { cost: number; count: number }> = {};
+        costs.forEach(r => {
+            const svc = r.type.toUpperCase();
+            if (!svcMap[svc]) svcMap[svc] = { cost: 0, count: 0 };
+            svcMap[svc].cost += r.monthlyEstimate;
+            svcMap[svc].count++;
+        });
+        const byService = Object.entries(svcMap)
+            .map(([service, v]) => ({ service, cost: Math.round(v.cost * 100) / 100, count: v.count }))
+            .filter(s => s.cost > 0 || s.count > 0)
+            .sort((a, b) => b.cost - a.cost);
+
+        vpcGroups.push({
+            vpcId,
+            vpcName: node.name || vpcId,
+            region: node.region,
+            totalMonthly: Math.round(totalMonthly * 100) / 100,
+            wastedCost: Math.round(wastedCost * 100) / 100,
+            resourceCount: costs.length,
+            byService,
+            resources: costs.sort((a, b) => b.monthlyEstimate - a.monthlyEstimate),
+            wastedResources: wastedRes,
+        });
+    }
+
+    // Sort VPCs by cost descending
+    vpcGroups.sort((a, b) => b.totalMonthly - a.totalMonthly);
+
+    // Unattached resources group
+    const unattachedTotal = unattached.reduce((s, r) => s + r.monthlyEstimate, 0);
+    const unattachedWasted = unattached.filter(r => r.isWasted);
+    const unattachedWastedCost = unattachedWasted.reduce((s, r) => s + r.monthlyEstimate, 0);
+
+    const unattachedSvcMap: Record<string, { cost: number; count: number }> = {};
+    unattached.forEach(r => {
+        const svc = r.type.toUpperCase();
+        if (!unattachedSvcMap[svc]) unattachedSvcMap[svc] = { cost: 0, count: 0 };
+        unattachedSvcMap[svc].cost += r.monthlyEstimate;
+        unattachedSvcMap[svc].count++;
+    });
+
+    const unattachedGroup: VpcCostGroup = {
+        vpcId: 'unattached',
+        vpcName: 'Global / Unattached Resources',
+        region: 'global',
+        totalMonthly: Math.round(unattachedTotal * 100) / 100,
+        wastedCost: Math.round(unattachedWastedCost * 100) / 100,
+        resourceCount: unattached.length,
+        byService: Object.entries(unattachedSvcMap)
+            .map(([service, v]) => ({ service, cost: Math.round(v.cost * 100) / 100, count: v.count }))
+            .sort((a, b) => b.cost - a.cost),
+        resources: unattached.sort((a, b) => b.monthlyEstimate - a.monthlyEstimate),
+        wastedResources: unattachedWasted,
+    };
+
+    const grandTotal = vpcGroups.reduce((s, g) => s + g.totalMonthly, 0) + unattachedGroup.totalMonthly;
+    const grandWasted = vpcGroups.reduce((s, g) => s + g.wastedCost, 0) + unattachedGroup.wastedCost;
+
+    return {
+        vpcGroups,
+        unattachedResources: unattachedGroup,
+        grandTotalMonthly: Math.round(grandTotal * 100) / 100,
+        grandWastedCost: Math.round(grandWasted * 100) / 100,
+        currency: 'USD',
+        disclaimer: 'Estimates are approximate, based on us-east-1 on-demand pricing. Actual costs may vary.',
+    };
+}

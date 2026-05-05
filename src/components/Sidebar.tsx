@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight, LayoutDashboard, Settings, ShieldAlert, Terminal, Boxes, Database, Network, LogOut, Brain, Map, Cloud, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, LayoutDashboard, Settings, ShieldAlert, Terminal, Boxes, Database, Network, LogOut, Brain, Map, Cloud, Trash2, DollarSign } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../utils/cn";
 import { useAuth } from "../contexts/AuthContext";
@@ -40,6 +40,7 @@ const navigation: NavItemType[] = [
       { name: "Access Logs", icon: Terminal, path: "/access-logs" },
     ],
   },
+  { name: "Cost Estimation", icon: DollarSign, path: "/cost-estimation" },
   { name: "System Config", icon: Settings, path: "/system-config" },
   { name: "ARIA AI Analyst", icon: Brain, path: "/ai-analyst" },
 ];

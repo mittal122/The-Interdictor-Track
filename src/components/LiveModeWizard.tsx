@@ -184,6 +184,16 @@ export function LiveModeWizard() {
                             <div className="space-y-4">
                                 <p className="text-xs text-zinc-400">Enter your <span className="text-zinc-200 font-medium">AWS IAM credentials</span>. Minimum required permission: <code className="text-xs text-zinc-300 font-mono bg-zinc-800 px-1 rounded">ReadOnlyAccess</code></p>
 
+                                {/* Helper Link for finding keys */}
+                                <div className="rounded border border-blue-900/40 bg-blue-950/20 p-2 text-[10px] leading-relaxed text-blue-200/70">
+                                    <strong className="text-blue-300">How to find these?</strong>
+                                    <ol className="list-decimal pl-4 mt-1 space-y-0.5">
+                                        <li>Log into the AWS Management Console</li>
+                                        <li>Click your username (top right) → Security credentials</li>
+                                        <li>Scroll down to "Access keys" and click "Create access key"</li>
+                                    </ol>
+                                </div>
+
                                 {/* Access Key ID */}
                                 <div>
                                     <label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1.5">AWS Access Key ID</label>

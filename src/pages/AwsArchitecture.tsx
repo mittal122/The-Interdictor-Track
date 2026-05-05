@@ -12,6 +12,7 @@ import { useSocket } from "../contexts/SocketContext";
 import { useAppMode } from "../contexts/AppModeContext";
 import { Isometric3DView } from "../components/Isometric3DView";
 import { CostEstimationPanel } from "../components/CostEstimationPanel";
+import { VpcCostEstimationPanel } from "../components/VpcCostEstimationPanel";
 import { TerraformExportModal } from "../components/TerraformExportModal";
 import { AiInsightsPanel } from "../components/AiInsightsPanel";
 import { AiInsight } from "../utils/insightDeduplicator";
@@ -492,6 +493,7 @@ export function AwsArchitecture() {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const containerRef = React.useRef<HTMLDivElement>(null);
     const [showCostPanel, setShowCostPanel] = useState(false);
+    const [showVpcCostPanel, setShowVpcCostPanel] = useState(false);
     const [showTfExport, setShowTfExport] = useState(false);
 
     const [showAiInsights, setShowAiInsights] = useState(false);
@@ -792,6 +794,20 @@ export function AwsArchitecture() {
                                 </span>
                             </button>
                             <button
+                                onClick={() => setShowVpcCostPanel(!showVpcCostPanel)}
+                                className={cn("inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-bold uppercase tracking-wider transition group relative",
+                                    showVpcCostPanel
+                                        ? "border-sky-500/40 bg-sky-500/20 text-sky-400"
+                                        : "border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-sky-400 hover:border-sky-500/30"
+                                )}
+                            >
+                                <Layers className="h-3 w-3" />
+                                <span>VPC Cost</span>
+                                <span className={cn("ml-1 text-[8px] px-1 py-0.5 rounded", showVpcCostPanel ? "bg-sky-950/60 text-sky-300" : "bg-zinc-700 text-zinc-400 group-hover:bg-sky-950 group-hover:text-sky-300")}>
+                                    FREE
+                                </span>
+                            </button>
+                            <button
                                 onClick={() => setShowTfExport(true)}
                                 title="This action calls AWS APIs which may incur small usage charges depending on your AWS account."
                                 className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700/50 bg-zinc-800/50 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-violet-400 hover:border-violet-500/30 transition group relative"
@@ -1085,6 +1101,11 @@ export function AwsArchitecture() {
             {/* Cost Estimation Panel */}
             {data && showCostPanel && (
                 <CostEstimationPanel infraData={data} onClose={() => setShowCostPanel(false)} />
+            )}
+
+            {/* VPC Cost Estimation Panel */}
+            {data && showVpcCostPanel && (
+                <VpcCostEstimationPanel infraData={data} onClose={() => setShowVpcCostPanel(false)} />
             )}
 
             {/* Terraform Export Modal */}

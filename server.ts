@@ -14,7 +14,7 @@ import { TelemetryService } from "./src/services/telemetryService";
 import { AlertingWorker } from "./src/services/alertingWorker";
 import { runAnalysis } from "./src/services/nimAnalystService";
 import { generateLayout } from "./src/services/nimLayoutService";
-import { estimateCosts } from "./src/services/costEstimationService";
+import { estimateCosts, estimateCostsByVpc } from "./src/services/costEstimationService";
 import { generateTerraform } from "./src/services/terraformExportService";
 import { analyzeInfrastructure } from './src/services/aiAnalystService';
 import { ariaChat } from './src/services/ariaChatService';
@@ -441,6 +441,18 @@ async function startServer() {
       }
     });
 
+    // ── VPC-Grouped Cost Estimation ────────────────────────────────────
+    socket.on("estimate_costs_by_vpc", async (data, callback) => {
+      try {
+        console.log("[COST] VPC-grouped cost estimation requested...");
+        const costs = estimateCostsByVpc(data.infraData);
+        callback({ status: "success", data: costs });
+      } catch (err: any) {
+        console.error("VPC Cost Estimation Error:", err);
+        callback({ status: "error", message: err.message });
+      }
+    });
+
     // ── Terraform Export ──────────────────────────────────────────────────
     socket.on("export_terraform", async (data, callback) => {
       try {
@@ -549,8 +561,9 @@ async function startServer() {
   const protocol = fs.existsSync(certPath) ? 'https' : 'http';
   const HOST = process.env.HOST || "0.0.0.0";
   httpServer.listen(PORT, HOST, () => {
+    const displayHost = HOST === "0.0.0.0" ? "localhost" : HOST;
     console.log(`\n🟢 Interdictor Command Center`);
-    console.log(`   Server: ${protocol}://${HOST}:${PORT}`);
+    console.log(`   Server: ${protocol}://${displayHost}:${PORT}`);
     console.log(`   Mode:   Demo (frontend-gen) + Live (per-socket AWS)\n`);
   });
 }

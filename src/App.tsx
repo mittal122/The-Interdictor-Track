@@ -16,6 +16,7 @@ import { GlobalNodes } from "./pages/GlobalNodes";
 import { AccessLogs } from "./pages/AccessLogs";
 import { SystemConfig } from "./pages/SystemConfig";
 import { AiAnalyst } from "./pages/AiAnalyst";
+import { CostEstimation } from "./pages/CostEstimation";
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
                   <Route path="access-logs" element={<AccessLogs />} />
                   <Route path="system-config" element={<SystemConfig />} />
                   <Route path="ai-analyst" element={<AiAnalyst />} />
+                  <Route path="cost-estimation" element={<CostEstimation />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/login" replace />} />
               </Routes>
